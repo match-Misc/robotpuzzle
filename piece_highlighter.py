@@ -69,7 +69,12 @@ def process_image(image_path):
 
 def main():
     # List of images to process
-    images = ["puzzle_solved.png", "puzzle_test01.png", "puzzle_test02.png"]
+    images = [
+        "puzzle_monitor.png",
+        "puzzle_test01.png",
+        "puzzle_test02.png",
+        "solved.png",
+    ]
 
     # Process each image
     for img_path in images:
