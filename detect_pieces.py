@@ -93,9 +93,9 @@ else:
             print("-" * 50)
 
             # --- 6. Visualize the Results ---
-            # Draw the contour outline with a unique color
+            # Fill the entire shape area with a unique color
             color = tuple(np.random.randint(50, 220, 3).tolist())
-            cv2.drawContours(output_image, [cnt], -1, color, 4)  # Thicker line
+            cv2.drawContours(output_image, [cnt], -1, color, -1)  # Fill the shape
 
             # Draw the centroid as a red circle
             cv2.circle(output_image, (cx, cy), 10, (0, 0, 255), -1)
