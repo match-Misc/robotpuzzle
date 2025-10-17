@@ -65,6 +65,10 @@ else:
             # Calculate Hu Moments for shape descriptor
             hu_moments = cv2.HuMoments(M).flatten().tolist()
 
+            # Calculate orientation using minAreaRect
+            rect = cv2.minAreaRect(cnt)
+            angle = rect[2]  # Angle of rotation
+
             # Collect piece data
             piece_data = {
                 "id": shape_number,
@@ -72,6 +76,7 @@ else:
                 "area": area,
                 "perimeter": perimeter,
                 "hu_moments": hu_moments,
+                "orientation": angle,
             }
             pieces_data.append(piece_data)
 
