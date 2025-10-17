@@ -402,47 +402,47 @@ class PuzzleSolverGUI:
             return []
 
     def match_pieces(self, detected_pieces, target_pieces):
-        solution_map = []
-        used_targets = set()
+        import scipy.optimize
 
-        for (
-            detected_cnt,
-            detected_hu,
-            detected_centroid,
-            detected_angle,
-        ) in detected_pieces:
-            best_match = None
-            best_score = float("inf")
-            best_target_centroid = None
-            best_target_angle = None
-
-            for target in target_pieces:
-                if target["id"] in used_targets:
-                    continue
+        # Create cost matrix
+        cost_matrix = np.zeros((len(detected_pieces), len(target_pieces)))
+        for i, (_, detected_hu, _, _) in enumerate(detected_pieces):
+            for j, target in enumerate(target_pieces):
                 target_hu = np.array(target["hu_moments"])
-                score = np.linalg.norm(detected_hu - target_hu)
-                if score < best_score:
-                    best_score = score
-                    best_match = target["id"]
-                    best_target_centroid = target["centroid"]
-                    best_target_angle = target["orientation"]
+                cost_matrix[i, j] = np.linalg.norm(detected_hu - target_hu)
 
-            if best_match is not None:
-                used_targets.add(best_match)
-                translation = (
-                    best_target_centroid[0] - detected_centroid[0],
-                    best_target_centroid[1] - detected_centroid[1],
+        # Solve assignment problem using Hungarian algorithm
+        row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix)
+
+        solution_map = []
+        for detected_idx, target_idx in zip(row_ind, col_ind):
+            detected_cnt, detected_hu, detected_centroid, detected_angle = (
+                detected_pieces[detected_idx]
+            )
+            target = target_pieces[target_idx]
+
+            best_target_centroid = target["centroid"]
+            best_target_angle = target["orientation"]
+            best_match = target["id"]
+
+            translation = (
+                best_target_centroid[0] - detected_centroid[0],
+                best_target_centroid[1] - detected_centroid[1],
+            )
+            rotation = best_target_angle - detected_angle
+
+            solution_map.append(
+                (
+                    detected_centroid,
+                    best_target_centroid,
+                    translation,
+                    rotation,
+                    best_match,
                 )
-                rotation = best_target_angle - detected_angle
-                solution_map.append(
-                    (
-                        detected_centroid,
-                        best_target_centroid,
-                        translation,
-                        rotation,
-                        best_match,
-                    )
-                )
+            )
+
+        # Sort solution_map to match the order of detected_pieces
+        solution_map = [solution_map[i] for i in np.argsort(row_ind)]
 
         return solution_map
 
