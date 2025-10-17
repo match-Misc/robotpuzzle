@@ -1,16 +1,21 @@
+import argparse
 import json
 import sys
 
 import cv2
 import numpy as np
 
-# --- 1. Load the Image ---
-if len(sys.argv) != 3:
-    print("Usage: python detect_pieces.py <image_path> <num_pieces>")
-    sys.exit(1)
+# --- 1. Parse Arguments ---
+parser = argparse.ArgumentParser(description="Detect puzzle pieces in an image.")
+parser.add_argument("image_path", help="Path to the input image")
+parser.add_argument("num_pieces", type=int, help="Number of pieces to detect")
+parser.add_argument("--show", action="store_true", help="Display the detection image")
 
-image_path = sys.argv[1]
-num_pieces = int(sys.argv[2])
+args = parser.parse_args()
+
+image_path = args.image_path
+num_pieces = args.num_pieces
+show_image = args.show
 image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
 if image is None:
@@ -116,3 +121,9 @@ else:
     with open(json_filename, "w") as f:
         json.dump(pieces_data, f, indent=4)
     print(f"\nJSON data saved to '{json_filename}'.")
+
+    # --- 8. Display Image if Requested ---
+    if show_image:
+        cv2.imshow("Detected Pieces", output_image)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
