@@ -36,6 +36,11 @@ class PuzzleSolverGUI:
         self.is_capturing = False
         self.current_frame = None
 
+        # Live mode variables
+        self.is_live_mode = False
+        self.live_thread = None
+        self.live_stop_event = threading.Event()
+
         # Create GUI elements
         self.create_widgets()
 
@@ -82,6 +87,16 @@ class PuzzleSolverGUI:
         )
         self.capture_btn.pack(side="left", padx=(0, 10))
 
+        # Live mode button
+        self.live_btn = ctk.CTkButton(
+            control_frame,
+            text="Start Live Mode",
+            command=self.toggle_live_mode,
+            fg_color="blue",
+            hover_color="dark blue",
+        )
+        self.live_btn.pack(side="left", padx=(0, 10))
+
         # Status label
         self.status_label = ctk.CTkLabel(control_frame, text="Ready", text_color="gray")
         self.status_label.pack(side="right", padx=(10, 0))
@@ -90,19 +105,37 @@ class PuzzleSolverGUI:
         display_frame = ctk.CTkFrame(main_frame)
         display_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Left panel - Captured image
+        # Left panel - Captured image and highlighted pieces
         left_panel = ctk.CTkFrame(display_frame)
         left_panel.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
-        captured_label = ctk.CTkLabel(
-            left_panel, text="Captured Puzzle", font=ctk.CTkFont(size=16, weight="bold")
+        # Raw image section
+        raw_frame = ctk.CTkFrame(left_panel)
+        raw_frame.pack(fill="both", expand=True, pady=(10, 5))
+
+        raw_label = ctk.CTkLabel(
+            raw_frame, text="Raw Puzzle", font=ctk.CTkFont(size=14, weight="bold")
         )
-        captured_label.pack(pady=(10, 5))
+        raw_label.pack(pady=(5, 5))
+
+        self.raw_canvas = ctk.CTkCanvas(raw_frame, bg="gray20", highlightthickness=0)
+        self.raw_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+
+        # Highlighted pieces section
+        highlighted_frame = ctk.CTkFrame(left_panel)
+        highlighted_frame.pack(fill="both", expand=True, pady=(0, 10))
+
+        highlighted_label = ctk.CTkLabel(
+            highlighted_frame,
+            text="Highlighted Pieces",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        highlighted_label.pack(pady=(5, 5))
 
         self.captured_canvas = ctk.CTkCanvas(
-            left_panel, bg="gray20", highlightthickness=0
+            highlighted_frame, bg="gray20", highlightthickness=0
         )
-        self.captured_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        self.captured_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
         # Right panel - Solution image
         right_panel = ctk.CTkFrame(display_frame)
@@ -121,6 +154,8 @@ class PuzzleSolverGUI:
         # Bind mouse events for hover
         self.captured_canvas.bind("<Motion>", self.on_mouse_move)
         self.captured_canvas.bind("<Leave>", self.on_mouse_leave)
+        self.raw_canvas.bind("<Motion>", self.on_mouse_move)
+        self.raw_canvas.bind("<Leave>", self.on_mouse_leave)
 
         # Info panel at bottom
         info_frame = ctk.CTkFrame(main_frame)
@@ -412,13 +447,37 @@ class PuzzleSolverGUI:
         return solution_map
 
     def update_display(self):
+        self.display_raw_image()
         self.display_captured_image()
         self.display_solution_image()
 
+    def display_raw_image(self):
+        if self.captured_image is not None:
+            # Resize to fit canvas
+            canvas_width = self.raw_canvas.winfo_width()
+            canvas_height = self.raw_canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                img_height, img_width = self.captured_image.shape[:2]
+                scale = min(canvas_width / img_width, canvas_height / img_height)
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+
+                resized = cv2.resize(self.captured_image, (new_width, new_height))
+                img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
+                self.raw_photo = ImageTk.PhotoImage(img)
+
+                # Center the image
+                x = (canvas_width - new_width) // 2
+                y = (canvas_height - new_height) // 2
+
+                self.raw_canvas.create_image(x, y, anchor="nw", image=self.raw_photo)
+
     def display_captured_image(self):
         if self.captured_image is not None and self.detected_pieces:
-            # Create highlighted image
-            highlighted = self.captured_image.copy()
+            # Create black background image for highlighted pieces only
+            img_height, img_width = self.captured_image.shape[:2]
+            highlighted = np.zeros((img_height, img_width, 3), dtype=np.uint8)
 
             # Generate unique colors
             num_pieces = len(self.detected_pieces)
@@ -429,7 +488,7 @@ class PuzzleSolverGUI:
                 bgr_color = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2BGR)[0][0]
                 colors.append((int(bgr_color[0]), int(bgr_color[1]), int(bgr_color[2])))
 
-            # Draw contours
+            # Draw filled contours on black background
             for i, (cnt, _, _, _) in enumerate(self.detected_pieces):
                 cv2.drawContours(highlighted, [cnt], -1, colors[i], -1)
 
@@ -438,7 +497,6 @@ class PuzzleSolverGUI:
             canvas_height = self.captured_canvas.winfo_height()
 
             if canvas_width > 1 and canvas_height > 1:
-                img_height, img_width = highlighted.shape[:2]
                 scale = min(canvas_width / img_width, canvas_height / img_height)
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
@@ -459,13 +517,14 @@ class PuzzleSolverGUI:
         if not self.detected_pieces or not self.solution_map:
             return
 
-        # Get canvas coordinates
-        canvas_x = self.captured_canvas.canvasx(event.x)
-        canvas_y = self.captured_canvas.canvasy(event.y)
+        # Determine which canvas triggered the event
+        canvas = event.widget
+        canvas_x = canvas.canvasx(event.x)
+        canvas_y = canvas.canvasy(event.y)
 
         # Convert to image coordinates
-        canvas_width = self.captured_canvas.winfo_width()
-        canvas_height = self.captured_canvas.winfo_height()
+        canvas_width = canvas.winfo_width()
+        canvas_height = canvas.winfo_height()
 
         if self.captured_image is not None:
             img_height, img_width = self.captured_image.shape[:2]
@@ -509,16 +568,16 @@ class PuzzleSolverGUI:
         if self.solution_image is not None:
             highlighted = self.solution_image.copy()
 
-            # Draw a circle at the target position
-            cv2.circle(highlighted, tuple(target_centroid), 30, (0, 255, 0), 4)
+            # Draw a larger circle at the target position for better visibility
+            cv2.circle(highlighted, tuple(target_centroid), 50, (0, 255, 0), 8)
             cv2.putText(
                 highlighted,
                 f"Piece {piece_id}",
-                (target_centroid[0] - 40, target_centroid[1] - 40),
+                (target_centroid[0] - 60, target_centroid[1] - 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                1,
+                1.5,
                 (0, 255, 0),
-                2,
+                3,
             )
 
             # Update solution canvas
@@ -557,6 +616,124 @@ class PuzzleSolverGUI:
         )
 
         self.info_label.configure(text=info_text)
+
+    def toggle_live_mode(self):
+        if self.is_live_mode:
+            self.stop_live_mode()
+        else:
+            self.start_live_mode()
+
+    def start_live_mode(self):
+        if not self.solution_exists:
+            self.status_label.configure(text="No solution available", text_color="red")
+            return
+
+        try:
+            num_pieces = int(self.num_pieces.get())
+            self.is_live_mode = True
+            self.live_stop_event.clear()
+            self.live_btn.configure(
+                text="Stop Live Mode", fg_color="red", hover_color="dark red"
+            )
+            self.status_label.configure(text="Live mode started", text_color="green")
+
+            # Start live processing thread
+            self.live_thread = threading.Thread(
+                target=self.live_processing_loop, args=(num_pieces,), daemon=True
+            )
+            self.live_thread.start()
+
+        except ValueError:
+            self.status_label.configure(
+                text="Invalid number of pieces", text_color="red"
+            )
+
+    def stop_live_mode(self):
+        self.is_live_mode = False
+        self.live_stop_event.set()
+        self.live_btn.configure(
+            text="Start Live Mode", fg_color="blue", hover_color="dark blue"
+        )
+        self.status_label.configure(text="Live mode stopped", text_color="gray")
+
+        # Close webcam if open
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
+
+    def live_processing_loop(self, num_pieces):
+        try:
+            # Load calibration
+            config = self.load_config()
+            if config is None:
+                self.root.after(
+                    0,
+                    lambda: self.status_label.configure(
+                        text="No calibration found", text_color="red"
+                    ),
+                )
+                return
+
+            M = np.array(config["M"])
+            output_size = tuple(config["output_size"])
+
+            # Load target pieces
+            target_pieces = self.load_target_pieces(num_pieces)
+
+            # Open webcam
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                self.root.after(
+                    0,
+                    lambda: self.status_label.configure(
+                        text="Cannot open webcam", text_color="red"
+                    ),
+                )
+                return
+
+            # Set webcam settings
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, 50)
+            self.cap.set(cv2.CAP_PROP_CONTRAST, 100)
+            self.cap.set(cv2.CAP_PROP_SATURATION, 0)
+
+            while not self.live_stop_event.is_set():
+                ret, frame = self.cap.read()
+                if not ret:
+                    continue
+
+                # Store current frame
+                self.captured_image = frame.copy()
+
+                # Apply perspective transform
+                transformed = cv2.warpPerspective(frame, M, output_size)
+
+                # Stretch to 16:10
+                stretched = self.stretch_to_16_10(transformed)
+
+                # Detect pieces
+                self.detected_pieces = self.detect_pieces(stretched, num_pieces)
+
+                # Match pieces
+                self.solution_map = self.match_pieces(
+                    self.detected_pieces, target_pieces
+                )
+
+                # Update GUI
+                self.root.after(0, self.update_display)
+
+                # Small delay to prevent excessive CPU usage
+                time.sleep(0.1)
+
+        except Exception as e:
+            error_msg = str(e)
+            self.root.after(
+                0,
+                lambda: self.status_label.configure(
+                    text=f"Live mode error: {error_msg}", text_color="red"
+                ),
+            )
 
     def run(self):
         self.root.mainloop()
