@@ -45,7 +45,7 @@ else:
         # Sort by area, largest first
         sorted_contours = sorted(contours, key=cv2.contourArea, reverse=True)
         # Select the largest contours, which will be our shapes
-        shapes = sorted_contours[:num_pieces]
+        shapes = sorted_contours[1 : num_pieces + 1]
 
         print(f"\nSuccessfully isolated {len(shapes)} shapes. Analyzing them now...\n")
         print("-" * 50)
@@ -124,6 +124,8 @@ else:
 
     # --- 8. Display Image if Requested ---
     if show_image:
-        cv2.imshow("Detected Pieces", output_image)
+        # Resize to half size for better screen fit
+        display_image = cv2.resize(output_image, (0, 0), fx=0.5, fy=0.5)
+        cv2.imshow("Detected Pieces", display_image)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
