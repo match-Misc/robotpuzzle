@@ -147,7 +147,7 @@ else:
         sys.exit(1)
 
     # --- 7. Output JSON ---
-    json_filename = f"Puzzle_{num_pieces}.json"
+    json_filename = f"configs/Puzzle_{num_pieces}.json"
     with open(json_filename, "w") as f:
         json.dump(pieces_data, f, indent=4)
     print(f"\nJSON data saved to '{json_filename}'.")

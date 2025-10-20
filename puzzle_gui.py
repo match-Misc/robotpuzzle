@@ -212,7 +212,7 @@ class PuzzleSolverGUI:
     def check_solution_exists(self):
         try:
             num_pieces = int(self.num_pieces.get())
-            json_path = f"Puzzle_{num_pieces}.json"
+            json_path = f"configs/Puzzle_{num_pieces}.json"
             png_path = f"Solutions/Puzzle_{num_pieces}.png"
 
             json_exists = os.path.exists(json_path)
@@ -296,7 +296,7 @@ class PuzzleSolverGUI:
 
     def launch_calibration(self):
         try:
-            subprocess.Popen([sys.executable, "puzzle_capture.py"])
+            subprocess.Popen([sys.executable, "puzzle_calibration.py"])
             self.status_label.configure(text="Calibration launched", text_color="blue")
         except Exception as e:
             self.status_label.configure(
@@ -406,7 +406,7 @@ class PuzzleSolverGUI:
 
     def load_config(self):
         try:
-            with open("config.json", "r") as f:
+            with open("configs/config.json", "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return None
@@ -542,7 +542,7 @@ class PuzzleSolverGUI:
 
     def load_target_pieces(self, puzzle_size):
         try:
-            with open(f"Puzzle_{puzzle_size}.json", "r") as f:
+            with open(f"configs/Puzzle_{puzzle_size}.json", "r") as f:
                 target_pieces = json.load(f)
 
             # Convert target centroids from pixels to mm relative to target frame

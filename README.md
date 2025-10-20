@@ -20,14 +20,14 @@ The system uses computer vision algorithms to analyze puzzle piece shapes, calcu
 1. **Camera Calibration** (`puzzle_capture.py`)
    - Calibrates the webcam to correct perspective distortion
    - Allows manual selection of puzzle boundary corners
-   - Saves calibration data to `config.json`
+   - Saves calibration data to `configs/config.json`
 
 2. **Piece Detection** (`detect_pieces.py`)
    - Processes puzzle images to identify individual pieces
    - Uses contour analysis and morphological operations
    - Computes Hu moments for shape matching
    - Calculates centroids and orientations
-   - Outputs piece data in JSON format (`Puzzle_N.json`)
+   - Outputs piece data in JSON format (`configs/Puzzle_N.json`)
 
 3. **Live Solving** (`puzzle_solver.py`)
    - GUI application built with CustomTkinter
@@ -85,7 +85,7 @@ First, create solution data for your puzzle:
 python detect_pieces.py path/to/solved_puzzle_image.png 24
 ```
 
-This generates `Puzzle_24.json` with piece data.
+This generates `configs/Puzzle_24.json` with piece data.
 
 ### 2. Calibrate Camera
 
@@ -119,9 +119,10 @@ robotpuzzle/
 ├── detect_pieces.py          # Piece detection from images
 ├── live_puzzle_highlighter.py # Basic live piece highlighting
 ├── live_puzzle_solver.py     # Command-line live solver
-├── config.json              # Camera calibration data
-├── Puzzle_12.json           # 12-piece puzzle solution data
-├── Puzzle_24.json           # 24-piece puzzle solution data
+├── configs/                  # Configuration files directory
+│   ├── config.json           # Camera calibration data
+│   ├── Puzzle_12.json        # 12-piece puzzle solution data
+│   └── Puzzle_24.json        # 24-piece puzzle solution data
 ├── Solutions/               # Solved puzzle images
 ├── examples/                # Example images and scripts
 └── README.md               # This file

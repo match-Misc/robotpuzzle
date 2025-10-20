@@ -165,9 +165,9 @@ def main():
                     "M": M.tolist() if M is not None else None,
                     "output_size": output_size,
                 }
-                with open("config.json", "w") as f:
+                with open("configs/config.json", "w") as f:
                     json.dump(config_data, f, indent=4)
-                print("Calibration data saved to config.json")
+                print("Calibration data saved to configs/config.json")
                 print(
                     "Calibration complete. Press 's' again to start/stop live transform."
                 )
