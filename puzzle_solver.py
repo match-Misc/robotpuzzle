@@ -63,9 +63,12 @@ class PuzzleSolverGUI:
         self.num_pieces = ctk.StringVar(value="24")
         self.solution_exists = False
         self.captured_image = None
+        self.stretched_image = None
         self.solution_image = None
         self.detected_pieces = []
         self.solution_map = []
+        self.target_pieces = []
+        self.piece_colors = []
         self.hovered_piece = None
 
         # Webcam variables
@@ -248,17 +251,38 @@ class PuzzleSolverGUI:
 
     def display_solution_image(self):
         if self.solution_image is not None:
+            # Start with the solution image
+            overlay = self.solution_image.copy()
+
+            # Overlay detected pieces if available
+            if self.detected_pieces and self.solution_map and self.piece_colors:
+                for i, (cnt, _, _, _, pickup_pose) in enumerate(self.detected_pieces):
+                    if i < len(self.solution_map):
+                        _, target_pose, _, _, _ = self.solution_map[i]
+                        # Transform contour to target space with detected orientation (no scaling for initial display)
+                        transformed_cnt = self.transform_contour(
+                            cnt,
+                            pickup_pose,
+                            target_pose,
+                            use_target_orientation=False,
+                            apply_scaling=False,
+                        )
+                        # Draw the transformed contour on the overlay
+                        cv2.drawContours(
+                            overlay, [transformed_cnt], -1, self.piece_colors[i], -1
+                        )
+
             # Resize to fit canvas
             canvas_width = self.solution_canvas.winfo_width()
             canvas_height = self.solution_canvas.winfo_height()
 
             if canvas_width > 1 and canvas_height > 1:
-                img_height, img_width = self.solution_image.shape[:2]
+                img_height, img_width = overlay.shape[:2]
                 scale = min(canvas_width / img_width, canvas_height / img_height)
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
 
-                resized = cv2.resize(self.solution_image, (new_width, new_height))
+                resized = cv2.resize(overlay, (new_width, new_height))
                 img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
                 self.solution_photo = ImageTk.PhotoImage(img)
 
@@ -348,15 +372,18 @@ class PuzzleSolverGUI:
 
             # Stretch to 16:10
             stretched = self.stretch_to_16_10(transformed)
+            self.stretched_image = stretched
 
             # Detect pieces
             self.detected_pieces = self.detect_pieces(stretched, num_pieces)
 
             # Load target pieces
-            target_pieces = self.load_target_pieces(num_pieces)
+            self.target_pieces = self.load_target_pieces(num_pieces)
 
             # Match pieces
-            self.solution_map = self.match_pieces(self.detected_pieces, target_pieces)
+            self.solution_map = self.match_pieces(
+                self.detected_pieces, self.target_pieces
+            )
 
             # Update GUI
             self.root.after(0, self.update_display)
@@ -401,6 +428,73 @@ class PuzzleSolverGUI:
             )
 
         return stretched
+
+    def transform_contour(
+        self,
+        contour,
+        pickup_pose,
+        target_pose,
+        use_target_orientation=True,
+        apply_scaling=False,
+        target_piece_id=None,
+    ):
+        """
+        Transform a contour from pickup space to target space with optional re-orientation and scaling.
+        """
+        # Extract poses
+        pickup_x, pickup_y, _, pickup_angle = pickup_pose
+        target_x, target_y, _, target_angle = target_pose
+
+        # Convert mm to pixels for pickup frame
+        pickup_x_px = (pickup_x / PICKUP_FRAME_WIDTH_MM) * self.stretched_image.shape[1]
+        pickup_y_px = (
+            self.stretched_image.shape[0]
+            - (pickup_y / PICKUP_FRAME_HEIGHT_MM) * self.stretched_image.shape[0]
+        )
+
+        # Convert mm to pixels for target frame
+        target_x_px = (target_x / TARGET_FRAME_WIDTH_MM) * TARGET_FRAME_RESOLUTION[0]
+        target_y_px = (
+            TARGET_FRAME_RESOLUTION[1]
+            - (target_y / TARGET_FRAME_HEIGHT_MM) * TARGET_FRAME_RESOLUTION[1]
+        )
+
+        # Translation vector
+        tx = target_x_px - pickup_x_px
+        ty = target_y_px - pickup_y_px
+
+        # Rotation angle (use target orientation if specified, otherwise keep detected)
+        angle = target_angle if use_target_orientation else pickup_angle
+
+        # Scaling factor (only if apply_scaling is True)
+        scale_factor = 1.0
+        if apply_scaling and target_piece_id is not None:
+            # Find the target piece to get its area
+            for piece in self.target_pieces:
+                if piece["id"] == target_piece_id:
+                    target_area = piece.get(
+                        "area", 1.0
+                    )  # Use area from JSON if available
+                    detected_area = cv2.contourArea(contour)
+                    if detected_area > 0:
+                        scale_factor = np.sqrt(target_area / detected_area)
+                    break
+
+        # Build transformation matrix with rotation and optional scaling
+        rotation_matrix = cv2.getRotationMatrix2D(
+            (pickup_x_px, pickup_y_px), angle - pickup_angle, scale_factor
+        )
+
+        # Apply translation
+        rotation_matrix[0, 2] += tx
+        rotation_matrix[1, 2] += ty
+
+        # Transform contour
+        transformed_contour = cv2.transform(
+            contour.reshape(-1, 1, 2).astype(np.float32), rotation_matrix
+        ).astype(np.int32)
+
+        return transformed_contour
 
     def detect_pieces(self, image, num_pieces):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -556,23 +650,24 @@ class PuzzleSolverGUI:
                 self.raw_canvas.create_image(x, y, anchor="nw", image=self.raw_photo)
 
     def display_captured_image(self):
-        if self.captured_image is not None and self.detected_pieces:
+        if self.stretched_image is not None and self.detected_pieces:
             # Create black background image for highlighted pieces only
-            img_height, img_width = self.captured_image.shape[:2]
+            img_height, img_width = self.stretched_image.shape[:2]
             highlighted = np.zeros((img_height, img_width, 3), dtype=np.uint8)
 
             # Generate unique colors
             num_pieces = len(self.detected_pieces)
-            colors = []
+            self.piece_colors = []
             for i in range(num_pieces):
                 hue = int(180 * i / num_pieces)
                 hsv_color = np.uint8([[[hue, 255, 255]]])
                 bgr_color = cv2.cvtColor(hsv_color, cv2.COLOR_HSV2BGR)[0][0]
-                colors.append((int(bgr_color[0]), int(bgr_color[1]), int(bgr_color[2])))
+                color = (int(bgr_color[0]), int(bgr_color[1]), int(bgr_color[2]))
+                self.piece_colors.append(color)
 
             # Draw filled contours on black background
             for i, (cnt, _, _, _, _) in enumerate(self.detected_pieces):
-                cv2.drawContours(highlighted, [cnt], -1, colors[i], -1)
+                cv2.drawContours(highlighted, [cnt], -1, self.piece_colors[i], -1)
 
             # Resize to fit canvas
             canvas_width = self.captured_canvas.winfo_width()
@@ -596,7 +691,11 @@ class PuzzleSolverGUI:
                 )
 
     def on_mouse_move(self, event):
-        if not self.detected_pieces or not self.solution_map:
+        if (
+            not self.detected_pieces
+            or not self.solution_map
+            or self.stretched_image is None
+        ):
             return
 
         # Determine which canvas triggered the event
@@ -608,26 +707,25 @@ class PuzzleSolverGUI:
         canvas_width = canvas.winfo_width()
         canvas_height = canvas.winfo_height()
 
-        if self.captured_image is not None:
-            img_height, img_width = self.captured_image.shape[:2]
-            scale = min(canvas_width / img_width, canvas_height / img_height)
-            new_width = int(img_width * scale)
-            new_height = int(img_height * scale)
+        img_height, img_width = self.stretched_image.shape[:2]
+        scale = min(canvas_width / img_width, canvas_height / img_height)
+        new_width = int(img_width * scale)
+        new_height = int(img_height * scale)
 
-            offset_x = (canvas_width - new_width) // 2
-            offset_y = (canvas_height - new_height) // 2
+        offset_x = (canvas_width - new_width) // 2
+        offset_y = (canvas_height - new_height) // 2
 
-            img_x = (canvas_x - offset_x) / scale
-            img_y = (canvas_y - offset_y) / scale
+        img_x = (canvas_x - offset_x) / scale
+        img_y = (canvas_y - offset_y) / scale
 
-            # Check if mouse is over a piece
-            for i, (cnt, _, centroid, _, _) in enumerate(self.detected_pieces):
-                if cv2.pointPolygonTest(cnt, (img_x, img_y), False) >= 0:
-                    if self.hovered_piece != i:
-                        self.hovered_piece = i
-                        self.highlight_solution_piece(i)
-                        self.update_info_text(i)
-                    return
+        # Check if mouse is over a piece
+        for i, (cnt, _, centroid, _, _) in enumerate(self.detected_pieces):
+            if cv2.pointPolygonTest(cnt, (img_x, img_y), False) >= 0:
+                if self.hovered_piece != i:
+                    self.hovered_piece = i
+                    self.highlight_solution_piece(i)
+                    self.update_info_text(i)
+                return
 
         # Mouse not over any piece
         if self.hovered_piece is not None:
@@ -642,15 +740,40 @@ class PuzzleSolverGUI:
             self.info_label.configure(text="Hover over pieces to see target positions")
 
     def highlight_solution_piece(self, piece_index):
-        if piece_index >= len(self.solution_map):
+        if piece_index >= len(self.solution_map) or not self.piece_colors:
             return
 
-        _, target_pose, _, _, piece_id = self.solution_map[piece_index]
+        pickup_pose, target_pose, _, _, piece_id = self.solution_map[piece_index]
+        cnt, _, _, _, _ = self.detected_pieces[piece_index]
 
         if self.solution_image is not None:
             highlighted = self.solution_image.copy()
 
-            # Convert target pose back to pixels for drawing
+            # Overlay all pieces with detected orientations
+            for i, (other_cnt, _, _, _, other_pickup_pose) in enumerate(
+                self.detected_pieces
+            ):
+                if i < len(self.solution_map):
+                    _, other_target_pose, _, _, _ = self.solution_map[i]
+                    # For the hovered piece, use target orientation and apply scaling; for others, use detected orientation without scaling
+                    use_target = i == piece_index
+                    apply_scaling = i == piece_index
+                    piece_id = (
+                        self.solution_map[i][4] if i < len(self.solution_map) else None
+                    )
+                    transformed_cnt = self.transform_contour(
+                        other_cnt,
+                        other_pickup_pose,
+                        other_target_pose,
+                        use_target_orientation=use_target,
+                        apply_scaling=apply_scaling,
+                        target_piece_id=piece_id,
+                    )
+                    cv2.drawContours(
+                        highlighted, [transformed_cnt], -1, self.piece_colors[i], -1
+                    )
+
+            # Convert target pose back to pixels for additional highlighting
             target_x_px = int(
                 (target_pose[0] / TARGET_FRAME_WIDTH_MM) * TARGET_FRAME_RESOLUTION[0]
             )
@@ -809,6 +932,7 @@ class PuzzleSolverGUI:
 
                 # Stretch to 16:10
                 stretched = self.stretch_to_16_10(transformed)
+                self.stretched_image = stretched
 
                 # Detect pieces
                 self.detected_pieces = self.detect_pieces(stretched, num_pieces)
