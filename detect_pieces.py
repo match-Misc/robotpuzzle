@@ -70,6 +70,41 @@ def get_pca_orientation(contour):
     return angle_deg
 
 
+def get_robust_orientation(contour, image_shape):
+    """
+    Calculate orientation using moments of the filled shape's mask.
+    This is generally more robust than fitting an ellipse to the contour points.
+    """
+    # 1. Create a blank mask
+    mask = np.zeros(image_shape, dtype=np.uint8)
+
+    # 2. Draw the contour filled in on the mask
+    cv2.drawContours(mask, [contour], -1, 255, -1)
+
+    # 3. Calculate moments from the mask
+    M = cv2.moments(mask)
+
+    # This check is important, as M['m00'] can be 0 for very small contours
+    if M["m00"] == 0:
+        # Fallback to the contour-based PCA if the mask is empty
+        return get_pca_orientation(contour)
+
+    # 4. Calculate orientation from second-order central moments
+    # These are pre-calculated in the moments dictionary as 'mu'
+    mu20 = M["mu20"]
+    mu02 = M["mu02"]
+    mu11 = M["mu11"]
+
+    angle_rad = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+    angle_deg = np.degrees(angle_rad)
+
+    # Normalize to 0-180 range for consistency
+    if angle_deg < 0:
+        angle_deg += 180
+
+    return angle_deg
+
+
 # --- 1. Parse Arguments ---
 parser = argparse.ArgumentParser(description="Detect puzzle pieces in an image.")
 parser.add_argument("image_path", help="Path to the input image")
@@ -135,8 +170,8 @@ else:
             # Calculate Hu Moments for shape descriptor
             hu_moments = cv2.HuMoments(M).flatten().tolist()
 
-            # Calculate orientation using ellipse fitting
-            angle = get_ellipse_orientation(cnt)
+            # Calculate orientation using robust moments method
+            angle = get_robust_orientation(cnt, thresh.shape)
 
             # Collect piece data
             piece_data = {

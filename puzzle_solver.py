@@ -76,6 +76,41 @@ def get_pca_orientation(contour):
     return angle_deg
 
 
+def get_robust_orientation(contour, image_shape):
+    """
+    Calculate orientation using moments of the filled shape's mask.
+    This is generally more robust than fitting an ellipse to the contour points.
+    """
+    # 1. Create a blank mask
+    mask = np.zeros(image_shape, dtype=np.uint8)
+
+    # 2. Draw the contour filled in on the mask
+    cv2.drawContours(mask, [contour], -1, 255, -1)
+
+    # 3. Calculate moments from the mask
+    M = cv2.moments(mask)
+
+    # This check is important, as M['m00'] can be 0 for very small contours
+    if M["m00"] == 0:
+        # Fallback to the contour-based PCA if the mask is empty
+        return get_pca_orientation(contour)
+
+    # 4. Calculate orientation from second-order central moments
+    # These are pre-calculated in the moments dictionary as 'mu'
+    mu20 = M["mu20"]
+    mu02 = M["mu02"]
+    mu11 = M["mu11"]
+
+    angle_rad = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+    angle_deg = np.degrees(angle_rad)
+
+    # Normalize to 0-180 range for consistency
+    if angle_deg < 0:
+        angle_deg += 180
+
+    return angle_deg
+
+
 # Set appearance mode and color theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -216,11 +251,12 @@ class PuzzleSolverGUI:
         )
         self.solution_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Bind mouse events for hover
+        # Bind mouse events for hover (only on captured canvas)
         self.captured_canvas.bind("<Motion>", self.on_mouse_move)
         self.captured_canvas.bind("<Leave>", self.on_mouse_leave)
-        self.raw_canvas.bind("<Motion>", self.on_mouse_move)
-        self.raw_canvas.bind("<Leave>", self.on_mouse_leave)
+
+        # Bind window resize event to rescale images
+        self.root.bind("<Configure>", self.on_resize)
 
         # Info panel at bottom
         info_frame = ctk.CTkFrame(main_frame)
@@ -453,7 +489,7 @@ class PuzzleSolverGUI:
                 cy = int(M["m01"] / M["m00"])
             else:
                 cx, cy = 0, 0
-            angle = get_ellipse_orientation(cnt)
+            angle = get_robust_orientation(cnt, gray.shape)
             detected_pieces.append((cnt, hu_moments, (cx, cy), angle))
 
         return detected_pieces
@@ -685,6 +721,13 @@ class PuzzleSolverGUI:
         )
 
         self.info_label.configure(text=info_text)
+
+    def on_resize(self, event):
+        # Rescale images when window is resized
+        self.update_display()
+        # Reapply highlight if hovering
+        if self.hovered_piece is not None:
+            self.highlight_solution_piece(self.hovered_piece)
 
     def toggle_live_mode(self):
         if self.is_live_mode:
