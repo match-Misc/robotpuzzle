@@ -7,6 +7,7 @@ import time
 
 import customtkinter as ctk
 import cv2
+import depthai as dai
 import numpy as np
 from PIL import Image, ImageTk
 
@@ -71,11 +72,18 @@ class PuzzleSolverGUI:
         self.live_thread = None
         self.live_stop_event = threading.Event()
 
+        # Continuous capture variables
+        self.continuous_capture_thread = None
+        self.continuous_stop_event = threading.Event()
+
         # Create GUI elements
         self.create_widgets()
 
         # Load solution image if exists
         self.check_solution_exists()
+
+        # Start continuous capture for raw input display
+        self.start_continuous_capture()
 
     def create_widgets(self):
         # Main frame
@@ -120,7 +128,7 @@ class PuzzleSolverGUI:
         # Live mode button
         self.live_btn = ctk.CTkButton(
             control_frame,
-            text="Start Live Mode",
+            text="Live View",
             command=self.toggle_live_mode,
             fg_color="blue",
             hover_color="dark blue",
@@ -279,18 +287,16 @@ class PuzzleSolverGUI:
 
         try:
             num_pieces = int(self.num_pieces.get())
-            self.status_label.configure(text="Capturing image...", text_color="blue")
+            self.status_label.configure(text="Processing...", text_color="blue")
 
-            # Capture single frame
-            self.capture_single_frame()
-
+            # Use the latest captured frame from continuous capture
             if self.captured_image is not None:
-                self.status_label.configure(text="Processing...", text_color="blue")
-
                 # Process in thread to avoid blocking GUI
                 threading.Thread(
                     target=self.process_puzzle, args=(num_pieces,), daemon=True
                 ).start()
+            else:
+                self.status_label.configure(text="No frame available", text_color="red")
 
         except ValueError:
             self.status_label.configure(
@@ -298,27 +304,61 @@ class PuzzleSolverGUI:
             )
 
     def capture_single_frame(self):
-        self.cap = cv2.VideoCapture(0)
-        if not self.cap.isOpened():
-            self.status_label.configure(text="Cannot open webcam", text_color="red")
-            return
+        try:
+            # Create pipeline for OAK D-Pro camera using DepthAI 2.30
+            pipeline = dai.Pipeline()
 
-        # Set webcam settings
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        self.cap.set(cv2.CAP_PROP_BRIGHTNESS, 50)
-        self.cap.set(cv2.CAP_PROP_CONTRAST, 100)
-        self.cap.set(cv2.CAP_PROP_SATURATION, 0)
+            # Create color camera node
+            camRgb = pipeline.create(dai.node.ColorCamera)
+            camRgb.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+            camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_12_MP)
+            camRgb.setFps(6)
+            camRgb.setVideoSize(3840, 2160)
 
-        ret, frame = self.cap.read()
-        if ret:
-            self.captured_image = frame.copy()
-        else:
+            # Create XLinkIn for camera control
+            control_in = pipeline.create(dai.node.XLinkIn)
+            control_in.setStreamName("control")
+            control_in.out.link(camRgb.inputControl)
+
+            # Create output
+            xoutRgb = pipeline.create(dai.node.XLinkOut)
+            xoutRgb.setStreamName("rgb_4k")
+            camRgb.video.link(xoutRgb.input)
+
+            # Start pipeline
+            device = dai.Device(pipeline)
+
+            # Set initial camera controls
+            control = dai.CameraControl()
+            control.setBrightness(1)
+            control.setContrast(1)
+            control.setManualExposure(10000, 300)
+            control.setManualFocus(123)
+            control.setLumaDenoise(4)
+            control.setChromaDenoise(4)
+            control.setAutoExposureLock(True)
+            control.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+            control.setAutoWhiteBalanceLock(True)
+            control.setAntiBandingMode(dai.CameraControl.AntiBandingMode.MAINS_50_HZ)
+
+            # Send initial control message
+            control_queue = device.getInputQueue("control")
+            control_queue.send(control)
+
+            # Wait for autofocus to settle
+            qRgb = device.getOutputQueue(name="rgb_4k", maxSize=4, blocking=False)
+            time.sleep(0.1)
+
+            # Get single frame
+            inRgb = qRgb.get()
+            frame = inRgb.getCvFrame()
+            self.captured_image = frame
+
+        except Exception as e:
             self.status_label.configure(
-                text="Failed to capture frame", text_color="red"
+                text=f"Failed to capture frame from OAK D-Pro: {str(e)}",
+                text_color="red",
             )
-
-        self.cap.release()
 
     def process_puzzle(self, num_pieces):
         try:
@@ -670,6 +710,75 @@ class PuzzleSolverGUI:
         else:
             self.start_live_mode()
 
+    def start_continuous_capture(self):
+        self.continuous_stop_event.clear()
+        self.continuous_capture_thread = threading.Thread(
+            target=self.continuous_capture_loop, daemon=True
+        )
+        self.continuous_capture_thread.start()
+
+    def continuous_capture_loop(self):
+        try:
+            # Create pipeline for OAK D-Pro camera using DepthAI 2.30
+            pipeline = dai.Pipeline()
+
+            # Create color camera node
+            camRgb = pipeline.create(dai.node.ColorCamera)
+            camRgb.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+            camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_12_MP)
+            camRgb.setFps(30)
+            camRgb.setVideoSize(3840, 2160)
+
+            # Create XLinkIn for camera control
+            control_in = pipeline.create(dai.node.XLinkIn)
+            control_in.setStreamName("control")
+            control_in.out.link(camRgb.inputControl)
+
+            # Create output
+            xoutRgb = pipeline.create(dai.node.XLinkOut)
+            xoutRgb.setStreamName("rgb_4k")
+            camRgb.video.link(xoutRgb.input)
+
+            # Start pipeline
+            device = dai.Device(pipeline)
+
+            # Set initial camera controls
+            control = dai.CameraControl()
+            control.setBrightness(1)
+            control.setContrast(1)
+            control.setManualExposure(10000, 300)
+            control.setManualFocus(123)
+            control.setLumaDenoise(4)
+            control.setChromaDenoise(4)
+            control.setAutoExposureLock(True)
+            control.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+            control.setAutoWhiteBalanceLock(True)
+            control.setAntiBandingMode(dai.CameraControl.AntiBandingMode.MAINS_50_HZ)
+
+            # Send initial control message
+            control_queue = device.getInputQueue("control")
+            control_queue.send(control)
+
+            # Wait for autofocus to settle
+            time.sleep(2)
+            qRgb = device.getOutputQueue(name="rgb_4k", maxSize=4, blocking=False)
+
+            while not self.continuous_stop_event.is_set():
+                inRgb = qRgb.get()
+                frame = inRgb.getCvFrame()
+
+                # Store current frame
+                self.captured_image = frame.copy()
+
+                # Update raw display
+                self.root.after(0, self.display_raw_image)
+
+                # Capture at 1fps
+                time.sleep(1)
+
+        except Exception as e:
+            print(f"Continuous capture error: {e}")
+
     def start_live_mode(self):
         if not self.solution_exists:
             self.status_label.configure(text="No solution available", text_color="red")
@@ -680,9 +789,9 @@ class PuzzleSolverGUI:
             self.is_live_mode = True
             self.live_stop_event.clear()
             self.live_btn.configure(
-                text="Stop Live Mode", fg_color="red", hover_color="dark red"
+                text="Stop Live View", fg_color="red", hover_color="dark red"
             )
-            self.status_label.configure(text="Live mode started", text_color="green")
+            self.status_label.configure(text="Live view started", text_color="green")
 
             # Start live processing thread
             self.live_thread = threading.Thread(
@@ -699,14 +808,11 @@ class PuzzleSolverGUI:
         self.is_live_mode = False
         self.live_stop_event.set()
         self.live_btn.configure(
-            text="Start Live Mode", fg_color="blue", hover_color="dark blue"
+            text="Live View", fg_color="blue", hover_color="dark blue"
         )
-        self.status_label.configure(text="Live mode stopped", text_color="gray")
+        self.status_label.configure(text="Live view stopped", text_color="gray")
 
-        # Close webcam if open
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        # Note: DepthAI pipeline handles camera cleanup automatically
 
     def live_processing_loop(self, num_pieces):
         try:
@@ -727,28 +833,53 @@ class PuzzleSolverGUI:
             # Load target pieces
             target_pieces = self.load_target_pieces(num_pieces)
 
-            # Open webcam
-            self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                self.root.after(
-                    0,
-                    lambda: self.status_label.configure(
-                        text="Cannot open webcam", text_color="red"
-                    ),
-                )
-                return
+            # Create pipeline for OAK D-Pro camera using DepthAI 2.30
+            pipeline = dai.Pipeline()
 
-            # Set webcam settings
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-            self.cap.set(cv2.CAP_PROP_BRIGHTNESS, 50)
-            self.cap.set(cv2.CAP_PROP_CONTRAST, 100)
-            self.cap.set(cv2.CAP_PROP_SATURATION, 0)
+            # Create color camera node
+            camRgb = pipeline.create(dai.node.ColorCamera)
+            camRgb.setBoardSocket(dai.CameraBoardSocket.CAM_A)
+            camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_12_MP)
+            camRgb.setFps(30)
+            camRgb.setVideoSize(3840, 2160)
+
+            # Create XLinkIn for camera control
+            control_in = pipeline.create(dai.node.XLinkIn)
+            control_in.setStreamName("control")
+            control_in.out.link(camRgb.inputControl)
+
+            # Create output
+            xoutRgb = pipeline.create(dai.node.XLinkOut)
+            xoutRgb.setStreamName("rgb_4k")
+            camRgb.video.link(xoutRgb.input)
+
+            # Start pipeline
+            device = dai.Device(pipeline)
+
+            # Set initial camera controls
+            control = dai.CameraControl()
+            control.setBrightness(1)
+            control.setContrast(1)
+            control.setManualExposure(10000, 300)
+            control.setManualFocus(123)
+            control.setLumaDenoise(4)
+            control.setChromaDenoise(4)
+            control.setAutoExposureLock(True)
+            control.setAutoFocusMode(dai.CameraControl.AutoFocusMode.OFF)
+            control.setAutoWhiteBalanceLock(True)
+            control.setAntiBandingMode(dai.CameraControl.AntiBandingMode.MAINS_50_HZ)
+
+            # Send initial control message
+            control_queue = device.getInputQueue("control")
+            control_queue.send(control)
+
+            # Wait for autofocus to settle
+            time.sleep(2)
+            qRgb = device.getOutputQueue(name="rgb_4k", maxSize=4, blocking=False)
 
             while not self.live_stop_event.is_set():
-                ret, frame = self.cap.read()
-                if not ret:
-                    continue
+                inRgb = qRgb.get()
+                frame = inRgb.getCvFrame()
 
                 # Store current frame
                 self.captured_image = frame.copy()
@@ -770,8 +901,8 @@ class PuzzleSolverGUI:
                 # Update GUI
                 self.root.after(0, self.update_display)
 
-                # Small delay to prevent excessive CPU usage
-                time.sleep(0.1)
+                # Capture at 1fps
+                time.sleep(1)
 
         except Exception as e:
             error_msg = str(e)
