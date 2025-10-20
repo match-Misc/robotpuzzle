@@ -11,6 +11,71 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
+
+def get_ellipse_orientation(contour):
+    """
+    Calculate the orientation of a shape using ellipse fitting on its contour points.
+    Returns the angle in degrees, normalized to -90 to 90 range.
+    """
+    if len(contour) < 5:
+        # Not enough points for ellipse fitting, fall back to PCA
+        return get_pca_orientation(contour)
+
+    try:
+        # Fit an ellipse to the contour
+        ellipse = cv2.fitEllipse(contour)
+        # ellipse is ((center_x, center_y), (width, height), angle)
+        angle_deg = ellipse[2]
+
+        # Normalize to -90 to 90 range
+        if angle_deg > 90:
+            angle_deg -= 180
+        elif angle_deg < -90:
+            angle_deg += 180
+
+        return angle_deg
+    except cv2.error:
+        # If ellipse fitting fails, fall back to PCA
+        return get_pca_orientation(contour)
+
+
+def get_pca_orientation(contour):
+    """
+    Calculate the orientation of a shape using PCA on its contour points.
+    Returns the angle in degrees, normalized to -90 to 90 range.
+    """
+    # Reshape contour to (N, 2)
+    points = contour.reshape(-1, 2).astype(np.float64)
+
+    # Compute mean
+    mean = np.mean(points, axis=0)
+
+    # Center points
+    centered = points - mean
+
+    # Covariance matrix
+    cov = np.cov(centered.T)
+
+    # Eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eig(cov)
+
+    # Find the principal eigenvector (largest eigenvalue)
+    idx = np.argmax(eigenvalues)
+    principal_axis = eigenvectors[:, idx]
+
+    # Compute angle
+    angle_rad = np.arctan2(principal_axis[1], principal_axis[0])
+    angle_deg = np.degrees(angle_rad)
+
+    # Normalize to -90 to 90 range, similar to minAreaRect
+    if angle_deg > 90:
+        angle_deg -= 180
+    elif angle_deg < -90:
+        angle_deg += 180
+
+    return angle_deg
+
+
 # Set appearance mode and color theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -388,8 +453,7 @@ class PuzzleSolverGUI:
                 cy = int(M["m01"] / M["m00"])
             else:
                 cx, cy = 0, 0
-            rect = cv2.minAreaRect(cnt)
-            angle = rect[2]
+            angle = get_ellipse_orientation(cnt)
             detected_pieces.append((cnt, hu_moments, (cx, cy), angle))
 
         return detected_pieces
@@ -430,6 +494,11 @@ class PuzzleSolverGUI:
                 best_target_centroid[1] - detected_centroid[1],
             )
             rotation = best_target_angle - detected_angle
+
+            # Debug logging
+            # print(
+            #     f"Piece {best_match}: detected_angle={detected_angle:.2f}, target_angle={best_target_angle:.2f}, rotation={rotation:.2f}"
+            # )
 
             solution_map.append(
                 (
