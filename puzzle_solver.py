@@ -4,7 +4,6 @@ import subprocess
 import sys
 import threading
 import time
-from pathlib import Path
 
 import customtkinter as ctk
 import cv2
@@ -375,7 +374,7 @@ class PuzzleSolverGUI:
         try:
             with open("config.json", "r") as f:
                 return json.load(f)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError):
             return None
 
     def stretch_to_16_10(self, image):
@@ -398,13 +397,18 @@ class PuzzleSolverGUI:
 
     def detect_pieces(self, image, num_pieces):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
+
+        # Apply Gaussian blur to smooth edges and reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        # Threshold the blurred image
+        _, thresh = cv2.threshold(blurred, 240, 255, cv2.THRESH_BINARY_INV)
 
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        closed_edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        closed_thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
         contours, _ = cv2.findContours(
-            closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            closed_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
         min_area = 1000
@@ -429,7 +433,7 @@ class PuzzleSolverGUI:
         try:
             with open(f"Puzzle_{puzzle_size}.json", "r") as f:
                 return json.load(f)
-        except:
+        except (FileNotFoundError, json.JSONDecodeError):
             return []
 
     def match_pieces(self, detected_pieces, target_pieces):
