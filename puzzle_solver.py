@@ -12,70 +12,6 @@ import numpy as np
 from PIL import Image, ImageTk
 
 
-def get_ellipse_orientation(contour):
-    """
-    Calculate the orientation of a shape using ellipse fitting on its contour points.
-    Returns the angle in degrees, normalized to -90 to 90 range.
-    """
-    if len(contour) < 5:
-        # Not enough points for ellipse fitting, fall back to PCA
-        return get_pca_orientation(contour)
-
-    try:
-        # Fit an ellipse to the contour
-        ellipse = cv2.fitEllipse(contour)
-        # ellipse is ((center_x, center_y), (width, height), angle)
-        angle_deg = ellipse[2]
-
-        # Normalize to -90 to 90 range
-        if angle_deg > 90:
-            angle_deg -= 180
-        elif angle_deg < -90:
-            angle_deg += 180
-
-        return angle_deg
-    except cv2.error:
-        # If ellipse fitting fails, fall back to PCA
-        return get_pca_orientation(contour)
-
-
-def get_pca_orientation(contour):
-    """
-    Calculate the orientation of a shape using PCA on its contour points.
-    Returns the angle in degrees, normalized to -90 to 90 range.
-    """
-    # Reshape contour to (N, 2)
-    points = contour.reshape(-1, 2).astype(np.float64)
-
-    # Compute mean
-    mean = np.mean(points, axis=0)
-
-    # Center points
-    centered = points - mean
-
-    # Covariance matrix
-    cov = np.cov(centered.T)
-
-    # Eigenvalues and eigenvectors
-    eigenvalues, eigenvectors = np.linalg.eig(cov)
-
-    # Find the principal eigenvector (largest eigenvalue)
-    idx = np.argmax(eigenvalues)
-    principal_axis = eigenvectors[:, idx]
-
-    # Compute angle
-    angle_rad = np.arctan2(principal_axis[1], principal_axis[0])
-    angle_deg = np.degrees(angle_rad)
-
-    # Normalize to -90 to 90 range, similar to minAreaRect
-    if angle_deg > 90:
-        angle_deg -= 180
-    elif angle_deg < -90:
-        angle_deg += 180
-
-    return angle_deg
-
-
 def get_robust_orientation(contour, image_shape):
     """
     Calculate orientation using moments of the filled shape's mask.
@@ -90,11 +26,6 @@ def get_robust_orientation(contour, image_shape):
     # 3. Calculate moments from the mask
     M = cv2.moments(mask)
 
-    # This check is important, as M['m00'] can be 0 for very small contours
-    if M["m00"] == 0:
-        # Fallback to the contour-based PCA if the mask is empty
-        return get_pca_orientation(contour)
-
     # 4. Calculate orientation from second-order central moments
     # These are pre-calculated in the moments dictionary as 'mu'
     mu20 = M["mu20"]
@@ -105,8 +36,8 @@ def get_robust_orientation(contour, image_shape):
     angle_deg = np.degrees(angle_rad)
 
     # Normalize to 0-180 range for consistency
-    if angle_deg < 0:
-        angle_deg += 180
+    # if angle_deg < 0:
+    #     angle_deg += 180
 
     return angle_deg
 
