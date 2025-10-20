@@ -10,6 +10,13 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
+# Physical dimensions
+PICKUP_FRAME_WIDTH_MM = 520
+PICKUP_FRAME_HEIGHT_MM = 325
+TARGET_FRAME_WIDTH_MM = 297  # DIN A4 width
+TARGET_FRAME_HEIGHT_MM = 210  # DIN A4 height
+TARGET_FRAME_RESOLUTION = (3510, 2482)  # pixels
+
 
 def get_robust_orientation(contour, image_shape):
     """
@@ -416,6 +423,8 @@ class PuzzleSolverGUI:
         contours = sorted(contours, key=cv2.contourArea, reverse=True)[:num_pieces]
 
         detected_pieces = []
+        img_height, img_width = image.shape[:2]
+
         for cnt in contours:
             M = cv2.moments(cnt)
             hu_moments = cv2.HuMoments(M).flatten()
@@ -425,14 +434,41 @@ class PuzzleSolverGUI:
             else:
                 cx, cy = 0, 0
             angle = get_robust_orientation(cnt, gray.shape)
-            detected_pieces.append((cnt, hu_moments, (cx, cy), angle))
+
+            # Convert pixel coordinates to mm relative to pickup frame (bottom-left is (0,0))
+            pickup_x_mm = (cx / img_width) * PICKUP_FRAME_WIDTH_MM
+            pickup_y_mm = (
+                (img_height - cy) / img_height
+            ) * PICKUP_FRAME_HEIGHT_MM  # Flip Y axis
+            pickup_pose = (pickup_x_mm, pickup_y_mm, 0, angle)  # (x, y, z, rotation)
+
+            detected_pieces.append((cnt, hu_moments, (cx, cy), angle, pickup_pose))
 
         return detected_pieces
 
     def load_target_pieces(self, puzzle_size):
         try:
             with open(f"Puzzle_{puzzle_size}.json", "r") as f:
-                return json.load(f)
+                target_pieces = json.load(f)
+
+            # Convert target centroids from pixels to mm relative to target frame
+            for piece in target_pieces:
+                centroid_px = piece["centroid"]
+                target_x_mm = (
+                    centroid_px[0] / TARGET_FRAME_RESOLUTION[0]
+                ) * TARGET_FRAME_WIDTH_MM
+                target_y_mm = (
+                    (TARGET_FRAME_RESOLUTION[1] - centroid_px[1])
+                    / TARGET_FRAME_RESOLUTION[1]
+                ) * TARGET_FRAME_HEIGHT_MM  # Flip Y axis
+                piece["target_pose"] = (
+                    target_x_mm,
+                    target_y_mm,
+                    0,
+                    piece["orientation"],
+                )  # (x, y, z, rotation)
+
+            return target_pieces
         except (FileNotFoundError, json.JSONDecodeError):
             return []
 
@@ -441,7 +477,7 @@ class PuzzleSolverGUI:
 
         # Create cost matrix
         cost_matrix = np.zeros((len(detected_pieces), len(target_pieces)))
-        for i, (_, detected_hu, _, _) in enumerate(detected_pieces):
+        for i, (_, detected_hu, _, _, _) in enumerate(detected_pieces):
             for j, target in enumerate(target_pieces):
                 target_hu = np.array(target["hu_moments"])
                 cost_matrix[i, j] = np.linalg.norm(detected_hu - target_hu)
@@ -451,20 +487,26 @@ class PuzzleSolverGUI:
 
         solution_map = []
         for detected_idx, target_idx in zip(row_ind, col_ind):
-            detected_cnt, detected_hu, detected_centroid, detected_angle = (
-                detected_pieces[detected_idx]
-            )
+            (
+                detected_cnt,
+                detected_hu,
+                detected_centroid,
+                detected_angle,
+                pickup_pose,
+            ) = detected_pieces[detected_idx]
             target = target_pieces[target_idx]
 
             best_target_centroid = target["centroid"]
             best_target_angle = target["orientation"]
             best_match = target["id"]
+            target_pose = target["target_pose"]
 
-            translation = (
-                best_target_centroid[0] - detected_centroid[0],
-                best_target_centroid[1] - detected_centroid[1],
+            # Compute transformation in mm and degrees
+            translation_mm = (
+                target_pose[0] - pickup_pose[0],
+                target_pose[1] - pickup_pose[1],
             )
-            rotation = best_target_angle - detected_angle
+            rotation_deg = best_target_angle - detected_angle
 
             # Debug logging
             # print(
@@ -473,10 +515,10 @@ class PuzzleSolverGUI:
 
             solution_map.append(
                 (
-                    detected_centroid,
-                    best_target_centroid,
-                    translation,
-                    rotation,
+                    pickup_pose,
+                    target_pose,
+                    translation_mm,
+                    rotation_deg,
                     best_match,
                 )
             )
@@ -529,7 +571,7 @@ class PuzzleSolverGUI:
                 colors.append((int(bgr_color[0]), int(bgr_color[1]), int(bgr_color[2])))
 
             # Draw filled contours on black background
-            for i, (cnt, _, _, _) in enumerate(self.detected_pieces):
+            for i, (cnt, _, _, _, _) in enumerate(self.detected_pieces):
                 cv2.drawContours(highlighted, [cnt], -1, colors[i], -1)
 
             # Resize to fit canvas
@@ -579,7 +621,7 @@ class PuzzleSolverGUI:
             img_y = (canvas_y - offset_y) / scale
 
             # Check if mouse is over a piece
-            for i, (cnt, _, centroid, _) in enumerate(self.detected_pieces):
+            for i, (cnt, _, centroid, _, _) in enumerate(self.detected_pieces):
                 if cv2.pointPolygonTest(cnt, (img_x, img_y), False) >= 0:
                     if self.hovered_piece != i:
                         self.hovered_piece = i
@@ -603,17 +645,26 @@ class PuzzleSolverGUI:
         if piece_index >= len(self.solution_map):
             return
 
-        _, target_centroid, _, _, piece_id = self.solution_map[piece_index]
+        _, target_pose, _, _, piece_id = self.solution_map[piece_index]
 
         if self.solution_image is not None:
             highlighted = self.solution_image.copy()
 
+            # Convert target pose back to pixels for drawing
+            target_x_px = int(
+                (target_pose[0] / TARGET_FRAME_WIDTH_MM) * TARGET_FRAME_RESOLUTION[0]
+            )
+            target_y_px = int(
+                TARGET_FRAME_RESOLUTION[1]
+                - (target_pose[1] / TARGET_FRAME_HEIGHT_MM) * TARGET_FRAME_RESOLUTION[1]
+            )
+
             # Draw a larger circle at the target position for better visibility
-            cv2.circle(highlighted, tuple(target_centroid), 50, (0, 255, 0), 8)
+            cv2.circle(highlighted, (target_x_px, target_y_px), 50, (0, 255, 0), 8)
             cv2.putText(
                 highlighted,
                 f"Piece {piece_id}",
-                (target_centroid[0] - 60, target_centroid[1] - 60),
+                (target_x_px - 60, target_y_px - 60),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 1.5,
                 (0, 255, 0),
@@ -645,14 +696,14 @@ class PuzzleSolverGUI:
         if piece_index >= len(self.solution_map):
             return
 
-        current_centroid, target_centroid, translation, rotation, piece_id = (
+        pickup_pose, target_pose, translation_mm, rotation_deg, piece_id = (
             self.solution_map[piece_index]
         )
 
         info_text = (
-            f"Piece {piece_id}: Current ({current_centroid[0]}, {current_centroid[1]}) -> "
-            f"Target ({target_centroid[0]}, {target_centroid[1]}) | "
-            f"Translate ({translation[0]}, {translation[1]}) | Rotate {rotation:.1f}°"
+            f"Piece {piece_id}: Pickup ({pickup_pose[0]:.1f}, {pickup_pose[1]:.1f}, {pickup_pose[2]:.1f}, {pickup_pose[3]:.1f}°) -> "
+            f"Target ({target_pose[0]:.1f}, {target_pose[1]:.1f}, {target_pose[2]:.1f}, {target_pose[3]:.1f}°) | "
+            f"Translate ({translation_mm[0]:.1f}, {translation_mm[1]:.1f}) mm | Rotate {rotation_deg:.1f}°"
         )
 
         self.info_label.configure(text=info_text)
