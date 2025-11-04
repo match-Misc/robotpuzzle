@@ -14,8 +14,15 @@ output_size = None
 def mouse_callback(event, x, y, flags, param):
     global points, selecting, frame_copy
     if event == cv2.EVENT_LBUTTONDOWN and selecting:
-        points.append((x, y))
-        print(f"Point {len(points)}: ({x}, {y})")
+        # Scale points back to original 4K coordinates since display is resized
+        scale_x = 3840 / 1920  # Original width / display width
+        scale_y = 2160 / 1080  # Original height / display height
+        original_x = int(x * scale_x)
+        original_y = int(y * scale_y)
+        points.append((original_x, original_y))
+        print(
+            f"Point {len(points)}: ({original_x}, {original_y}) [from display: ({x}, {y})]"
+        )
         if len(points) == 4:
             selecting = False
             print("All 4 points selected. Processing...")
@@ -25,9 +32,9 @@ def set_webcam_settings(cap, brightness=50, contrast=100, saturation=0):
     cap.set(cv2.CAP_PROP_BRIGHTNESS, brightness)
     cap.set(cv2.CAP_PROP_CONTRAST, contrast)
     cap.set(cv2.CAP_PROP_SATURATION, saturation)
-    # Set resolution to Full HD
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    # Set resolution to 4K
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
 
 
 def capture_frame(cap):
@@ -118,17 +125,27 @@ def main():
             print("Failed to read frame")
             break
 
+        # Resize frame for display if it's 4K to fit screen better
         display_frame = frame.copy()
+        if frame.shape[1] == 3840 and frame.shape[0] == 2160:
+            display_frame = cv2.resize(
+                display_frame, (1920, 1080), interpolation=cv2.INTER_LINEAR
+            )
 
         if not calibrated:
             # Draw selected points with highlighting during calibration
             for i, pt in enumerate(points):
-                cv2.circle(display_frame, pt, 10, (0, 255, 0), 2)
-                cv2.circle(display_frame, pt, 5, (0, 255, 0), -1)
+                # Scale points to display coordinates for drawing
+                scale_x = 1920 / 3840  # Display width / original width
+                scale_y = 1080 / 2160  # Display height / original height
+                display_pt = (int(pt[0] * scale_x), int(pt[1] * scale_y))
+
+                cv2.circle(display_frame, display_pt, 10, (0, 255, 0), 2)
+                cv2.circle(display_frame, display_pt, 5, (0, 255, 0), -1)
                 cv2.putText(
                     display_frame,
                     str(i + 1),
-                    (pt[0] + 15, pt[1] - 15),
+                    (display_pt[0] + 15, display_pt[1] - 15),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
                     (0, 255, 0),
@@ -137,7 +154,15 @@ def main():
 
             # Draw lines connecting the points if all 4 are selected
             if len(points) == 4:
-                cv2.polylines(display_frame, [np.array(points)], True, (255, 0, 0), 2)
+                # Scale points to display coordinates for drawing the polygon
+                scale_x = 1920 / 3840  # Display width / original width
+                scale_y = 1080 / 2160  # Display height / original height
+                display_points = [
+                    (int(pt[0] * scale_x), int(pt[1] * scale_y)) for pt in points
+                ]
+                cv2.polylines(
+                    display_frame, [np.array(display_points)], True, (255, 0, 0), 2
+                )
 
         cv2.imshow("Webcam Feed", display_frame)
 
@@ -145,7 +170,15 @@ def main():
             # Show transformed frame continuously
             transformed = apply_perspective_transform(frame)
             if transformed is not None:
-                cv2.imshow("Transformed Puzzle", transformed)
+                # Resize transformed frame for display if needed
+                display_transformed = transformed.copy()
+                if transformed.shape[1] > 1920 or transformed.shape[0] > 1080:
+                    display_transformed = cv2.resize(
+                        display_transformed,
+                        (1920, 1080),
+                        interpolation=cv2.INTER_LINEAR,
+                    )
+                cv2.imshow("Transformed Puzzle", display_transformed)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord("q"):

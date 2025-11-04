@@ -15,6 +15,11 @@ PICKUP_FRAME_WIDTH_MM = 520
 PICKUP_FRAME_HEIGHT_MM = 325
 TARGET_FRAME_WIDTH_MM = 297  # DIN A4 width
 TARGET_FRAME_HEIGHT_MM = 210  # DIN A4 height
+# Pixel resolution of the target (solved) puzzle image frame.
+# Corresponds to DIN A4 dimensions at 300 DPI:
+# Width: 297mm × 300 DPI ÷ 25.4 ≈ 3510 pixels
+# Height: 210mm × 300 DPI ÷ 25.4 ≈ 2482 pixels
+# Used for coordinate transformations between millimeters and pixels in the solution image.
 TARGET_FRAME_RESOLUTION = (3510, 2482)  # pixels
 
 
@@ -63,6 +68,8 @@ class PuzzleSolverGUI:
         self.num_pieces = ctk.StringVar(value="24")
         self.solution_exists = False
         self.captured_image = None
+        self.warped_image = None
+        self.threshold_image = None
         self.stretched_image = None
         self.solution_image = None
         self.detected_pieces = []
@@ -70,6 +77,8 @@ class PuzzleSolverGUI:
         self.target_pieces = []
         self.piece_colors = []
         self.hovered_piece = None
+        self.threshold_value = ctk.DoubleVar(value=127)
+        self.use_adaptive_threshold = ctk.BooleanVar(value=False)
 
         # Webcam variables
         self.cap = None
@@ -137,6 +146,41 @@ class PuzzleSolverGUI:
         )
         self.live_btn.pack(side="left", padx=(0, 10))
 
+        # Threshold controls - compact horizontal layout
+        threshold_label = ctk.CTkLabel(control_frame, text="Threshold:")
+        threshold_label.pack(side="left", padx=(0, 5))
+
+        # Adaptive threshold checkbox
+        self.adaptive_checkbox = ctk.CTkCheckBox(
+            control_frame,
+            text="Adaptive",
+            variable=self.use_adaptive_threshold,
+            command=self.on_threshold_mode_change,
+            width=70,
+        )
+        self.adaptive_checkbox.pack(side="left", padx=(0, 10))
+
+        # Threshold slider
+        self.threshold_slider = ctk.CTkSlider(
+            control_frame,
+            from_=0,
+            to=255,
+            variable=self.threshold_value,
+            command=self.on_threshold_change,
+            width=120,
+            height=16,
+        )
+        self.threshold_slider.pack(side="left", padx=(0, 5))
+
+        # Threshold value label
+        self.threshold_label = ctk.CTkLabel(
+            control_frame,
+            text="127",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            width=30,
+        )
+        self.threshold_label.pack(side="left", padx=(0, 10))
+
         # Status label
         self.status_label = ctk.CTkLabel(control_frame, text="Ready", text_color="gray")
         self.status_label.pack(side="right", padx=(10, 0))
@@ -145,35 +189,71 @@ class PuzzleSolverGUI:
         display_frame = ctk.CTkFrame(main_frame)
         display_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Left panel - Captured image and highlighted pieces
+        # Left panel - Images in two rows
         left_panel = ctk.CTkFrame(display_frame)
         left_panel.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
+        # First row - Raw, Warped, Threshold images
+        first_row = ctk.CTkFrame(left_panel)
+        first_row.pack(fill="both", expand=True, pady=(10, 5))
+
         # Raw image section
-        raw_frame = ctk.CTkFrame(left_panel)
-        raw_frame.pack(fill="both", expand=True, pady=(10, 5))
+        raw_frame = ctk.CTkFrame(first_row)
+        raw_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
 
         raw_label = ctk.CTkLabel(
-            raw_frame, text="Raw Puzzle", font=ctk.CTkFont(size=14, weight="bold")
+            raw_frame, text="Raw Puzzle", font=ctk.CTkFont(size=12, weight="bold")
         )
         raw_label.pack(pady=(5, 5))
 
         self.raw_canvas = ctk.CTkCanvas(raw_frame, bg="gray20", highlightthickness=0)
-        self.raw_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 5))
+        self.raw_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
 
-        # Highlighted pieces section
-        highlighted_frame = ctk.CTkFrame(left_panel)
-        highlighted_frame.pack(fill="both", expand=True, pady=(0, 10))
+        # Warped image section
+        warped_frame = ctk.CTkFrame(first_row)
+        warped_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        warped_label = ctk.CTkLabel(
+            warped_frame,
+            text="Warped Puzzle",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        warped_label.pack(pady=(5, 5))
+
+        self.warped_canvas = ctk.CTkCanvas(
+            warped_frame, bg="gray20", highlightthickness=0
+        )
+        self.warped_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # Threshold image section
+        threshold_frame = ctk.CTkFrame(first_row)
+        threshold_frame.pack(side="left", fill="both", expand=True, padx=(0, 0))
+
+        threshold_label = ctk.CTkLabel(
+            threshold_frame,
+            text="Threshold",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        threshold_label.pack(pady=(5, 5))
+
+        self.threshold_canvas = ctk.CTkCanvas(
+            threshold_frame, bg="gray20", highlightthickness=0
+        )
+        self.threshold_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # Second row - Detected pieces
+        second_row = ctk.CTkFrame(left_panel)
+        second_row.pack(fill="both", expand=True, pady=(0, 10))
 
         highlighted_label = ctk.CTkLabel(
-            highlighted_frame,
-            text="Highlighted Pieces",
+            second_row,
+            text="Detected Pieces",
             font=ctk.CTkFont(size=14, weight="bold"),
         )
         highlighted_label.pack(pady=(5, 5))
 
         self.captured_canvas = ctk.CTkCanvas(
-            highlighted_frame, bg="gray20", highlightthickness=0
+            second_row, bg="gray20", highlightthickness=0
         )
         self.captured_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
@@ -208,6 +288,51 @@ class PuzzleSolverGUI:
             font=ctk.CTkFont(size=12),
         )
         self.info_label.pack(pady=10)
+
+    def on_threshold_change(self, value):
+        """Callback when threshold slider value changes."""
+        # Update the threshold label
+        self.threshold_label.configure(text=f"{int(float(value))}")
+
+        # Update threshold display if we have an image
+        if self.stretched_image is not None:
+            self.threshold_image = self.compute_threshold(self.stretched_image)
+            self.display_threshold_image()
+
+            # Update piece detection if we have target pieces loaded
+            if self.target_pieces:
+                num_pieces = int(self.num_pieces.get())
+                self.detected_pieces = self.detect_pieces(
+                    self.stretched_image, num_pieces
+                )
+                self.solution_map = self.match_pieces(
+                    self.detected_pieces, self.target_pieces
+                )
+                self.display_captured_image()
+                self.display_solution_image()
+
+            # In live mode, also update piece detection
+            if self.is_live_mode:
+                num_pieces = int(self.num_pieces.get())
+                self.detected_pieces = self.detect_pieces(
+                    self.stretched_image, num_pieces
+                )
+                if self.target_pieces:
+                    self.solution_map = self.match_pieces(
+                        self.detected_pieces, self.target_pieces
+                    )
+                self.display_captured_image()
+                self.display_solution_image()
+
+    def on_threshold_mode_change(self):
+        """Callback when adaptive checkbox is toggled."""
+        # Enable/disable slider based on checkbox
+        is_adaptive = self.use_adaptive_threshold.get()
+        self.threshold_slider.configure(state="disabled" if is_adaptive else "normal")
+
+        # Update threshold display and piece detection if we have an image
+        if self.stretched_image is not None:
+            self.on_threshold_change(self.threshold_value.get())
 
     def check_solution_exists(self):
         try:
@@ -335,8 +460,8 @@ class PuzzleSolverGUI:
             return
 
         # Set webcam settings
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
         self.cap.set(cv2.CAP_PROP_BRIGHTNESS, 50)
         self.cap.set(cv2.CAP_PROP_CONTRAST, 100)
         self.cap.set(cv2.CAP_PROP_SATURATION, 0)
@@ -369,6 +494,7 @@ class PuzzleSolverGUI:
 
             # Apply perspective transform
             transformed = cv2.warpPerspective(self.captured_image, M, output_size)
+            self.warped_image = transformed
 
             # Stretch to 16:10
             stretched = self.stretch_to_16_10(transformed)
@@ -428,6 +554,33 @@ class PuzzleSolverGUI:
             )
 
         return stretched
+
+    def compute_threshold(self, image):
+        """Compute threshold image using either manual or adaptive thresholding."""
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+        if self.use_adaptive_threshold.get():
+            # Use adaptive thresholding
+            thresh = cv2.adaptiveThreshold(
+                blurred,
+                255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY_INV,
+                11,
+                2,
+            )
+        else:
+            # Use manual thresholding
+            threshold_value = int(self.threshold_value.get())
+            _, thresh = cv2.threshold(
+                blurred, threshold_value, 255, cv2.THRESH_BINARY_INV
+            )
+
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        closed_thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+
+        return closed_thresh
 
     def transform_contour(
         self,
@@ -497,24 +650,23 @@ class PuzzleSolverGUI:
         return transformed_contour
 
     def detect_pieces(self, image, num_pieces):
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-        # Apply Gaussian blur to smooth edges and reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-        # Threshold the blurred image
-        _, thresh = cv2.threshold(blurred, 240, 255, cv2.THRESH_BINARY_INV)
-
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
-        closed_thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        # Compute threshold using the new method
+        self.threshold_image = self.compute_threshold(image)
 
         contours, _ = cv2.findContours(
-            closed_thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            self.threshold_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
 
+        # Get gray image for orientation calculation
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
         min_area = 1000
-        contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:num_pieces]
+        filtered_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
+
+        contours = sorted(filtered_contours, key=cv2.contourArea, reverse=True)[
+            :num_pieces
+        ]
 
         detected_pieces = []
         img_height, img_width = image.shape[:2]
@@ -624,30 +776,92 @@ class PuzzleSolverGUI:
 
     def update_display(self):
         self.display_raw_image()
+        self.display_warped_image()
+        self.display_threshold_image()
         self.display_captured_image()
         self.display_solution_image()
 
     def display_raw_image(self):
         if self.captured_image is not None:
-            # Resize to fit canvas
+            # Resize to fit canvas (downscale 4K to fit screen if needed)
             canvas_width = self.raw_canvas.winfo_width()
             canvas_height = self.raw_canvas.winfo_height()
 
             if canvas_width > 1 and canvas_height > 1:
                 img_height, img_width = self.captured_image.shape[:2]
+
+                # If image is 4K, resize to fit screen better while maintaining aspect ratio
+                if img_width == 3840 and img_height == 2160:
+                    scale = min(canvas_width / 1920, canvas_height / 1080)
+                    display_width = int(1920 * scale)
+                    display_height = int(1080 * scale)
+                else:
+                    scale = min(canvas_width / img_width, canvas_height / img_height)
+                    display_width = int(img_width * scale)
+                    display_height = int(img_height * scale)
+
+                resized = cv2.resize(
+                    self.captured_image, (display_width, display_height)
+                )
+                img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
+                self.raw_photo = ImageTk.PhotoImage(img)
+
+                # Center the image
+                x = (canvas_width - display_width) // 2
+                y = (canvas_height - display_height) // 2
+
+                self.raw_canvas.create_image(x, y, anchor="nw", image=self.raw_photo)
+
+    def display_warped_image(self):
+        if self.warped_image is not None:
+            # Resize to fit canvas
+            canvas_width = self.warped_canvas.winfo_width()
+            canvas_height = self.warped_canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                img_height, img_width = self.warped_image.shape[:2]
                 scale = min(canvas_width / img_width, canvas_height / img_height)
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
 
-                resized = cv2.resize(self.captured_image, (new_width, new_height))
+                resized = cv2.resize(self.warped_image, (new_width, new_height))
                 img = Image.fromarray(cv2.cvtColor(resized, cv2.COLOR_BGR2RGB))
-                self.raw_photo = ImageTk.PhotoImage(img)
+                self.warped_photo = ImageTk.PhotoImage(img)
 
                 # Center the image
                 x = (canvas_width - new_width) // 2
                 y = (canvas_height - new_height) // 2
 
-                self.raw_canvas.create_image(x, y, anchor="nw", image=self.raw_photo)
+                self.warped_canvas.create_image(
+                    x, y, anchor="nw", image=self.warped_photo
+                )
+
+    def display_threshold_image(self):
+        if self.threshold_image is not None:
+            # Resize to fit canvas
+            canvas_width = self.threshold_canvas.winfo_width()
+            canvas_height = self.threshold_canvas.winfo_height()
+
+            if canvas_width > 1 and canvas_height > 1:
+                img_height, img_width = self.threshold_image.shape[:2]
+                scale = min(canvas_width / img_width, canvas_height / img_height)
+                new_width = int(img_width * scale)
+                new_height = int(img_height * scale)
+
+                resized = cv2.resize(self.threshold_image, (new_width, new_height))
+                # Convert grayscale to RGB for display
+                if len(resized.shape) == 2:
+                    resized = cv2.cvtColor(resized, cv2.COLOR_GRAY2RGB)
+                img = Image.fromarray(resized)
+                self.threshold_photo = ImageTk.PhotoImage(img)
+
+                # Center the image
+                x = (canvas_width - new_width) // 2
+                y = (canvas_height - new_height) // 2
+
+                self.threshold_canvas.create_image(
+                    x, y, anchor="nw", image=self.threshold_photo
+                )
 
     def display_captured_image(self):
         if self.stretched_image is not None and self.detected_pieces:
@@ -695,6 +909,7 @@ class PuzzleSolverGUI:
             not self.detected_pieces
             or not self.solution_map
             or self.stretched_image is None
+            or not hasattr(self, "info_label")
         ):
             return
 
@@ -734,7 +949,7 @@ class PuzzleSolverGUI:
             self.info_label.configure(text="Hover over pieces to see target positions")
 
     def on_mouse_leave(self, event):
-        if self.hovered_piece is not None:
+        if self.hovered_piece is not None and hasattr(self, "info_label"):
             self.hovered_piece = None
             self.display_solution_image()
             self.info_label.configure(text="Hover over pieces to see target positions")
@@ -913,8 +1128,8 @@ class PuzzleSolverGUI:
                 return
 
             # Set webcam settings
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 3840)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
             self.cap.set(cv2.CAP_PROP_BRIGHTNESS, 50)
             self.cap.set(cv2.CAP_PROP_CONTRAST, 100)
             self.cap.set(cv2.CAP_PROP_SATURATION, 0)
@@ -929,12 +1144,13 @@ class PuzzleSolverGUI:
 
                 # Apply perspective transform
                 transformed = cv2.warpPerspective(frame, M, output_size)
+                self.warped_image = transformed
 
                 # Stretch to 16:10
                 stretched = self.stretch_to_16_10(transformed)
                 self.stretched_image = stretched
 
-                # Detect pieces
+                # Detect pieces (this also sets self.threshold_image)
                 self.detected_pieces = self.detect_pieces(stretched, num_pieces)
 
                 # Match pieces
