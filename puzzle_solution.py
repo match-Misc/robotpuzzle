@@ -8,28 +8,32 @@ import numpy as np
 
 def get_robust_orientation(contour, image_shape):
     """
-    Calculate orientation using moments of the filled shape's mask.
-    This is generally more robust than fitting an ellipse to the contour points.
+    Calculate orientation using PCA (Principal Component Analysis) on contour points.
+    This method finds the main axis of the shape without assuming symmetry.
     """
-    # 1. Create a blank mask
-    mask = np.zeros(image_shape, dtype=np.uint8)
+    # Convert contour to numpy array of points
+    points = contour.reshape(-1, 2).astype(np.float64)
 
-    # 2. Draw the contour filled in on the mask
-    cv2.drawContours(mask, [contour], -1, 255, -1)
+    # Calculate mean
+    mean = np.mean(points, axis=0)
 
-    # 3. Calculate moments from the mask
-    M = cv2.moments(mask)
+    # Center the points
+    centered = points - mean
 
-    # 4. Calculate orientation from second-order central moments
-    # These are pre-calculated in the moments dictionary as 'mu'
-    mu20 = M["mu20"]
-    mu02 = M["mu02"]
-    mu11 = M["mu11"]
+    # Calculate covariance matrix
+    cov = np.cov(centered.T)
 
-    angle_rad = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+    # Get eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    # The eigenvector corresponding to the largest eigenvalue is the main axis
+    main_axis = eigenvectors[:, np.argmax(eigenvalues)]
+
+    # Calculate angle from the horizontal
+    angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
 
-    # Normalize to 0-180 range for consistency
+    # Normalize to 0-180 range
     if angle_deg < 0:
         angle_deg += 180
 

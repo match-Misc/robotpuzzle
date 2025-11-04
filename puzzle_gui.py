@@ -25,30 +25,34 @@ TARGET_FRAME_RESOLUTION = (3510, 2482)  # pixels
 
 def get_robust_orientation(contour, image_shape):
     """
-    Calculate orientation using moments of the filled shape's mask.
-    This is generally more robust than fitting an ellipse to the contour points.
+    Calculate orientation using PCA (Principal Component Analysis) on contour points.
+    This method finds the main axis of the shape without assuming symmetry.
     """
-    # 1. Create a blank mask
-    mask = np.zeros(image_shape, dtype=np.uint8)
+    # Convert contour to numpy array of points
+    points = contour.reshape(-1, 2).astype(np.float64)
 
-    # 2. Draw the contour filled in on the mask
-    cv2.drawContours(mask, [contour], -1, 255, -1)
+    # Calculate mean
+    mean = np.mean(points, axis=0)
 
-    # 3. Calculate moments from the mask
-    M = cv2.moments(mask)
+    # Center the points
+    centered = points - mean
 
-    # 4. Calculate orientation from second-order central moments
-    # These are pre-calculated in the moments dictionary as 'mu'
-    mu20 = M["mu20"]
-    mu02 = M["mu02"]
-    mu11 = M["mu11"]
+    # Calculate covariance matrix
+    cov = np.cov(centered.T)
 
-    angle_rad = 0.5 * np.arctan2(2 * mu11, mu20 - mu02)
+    # Get eigenvalues and eigenvectors
+    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+
+    # The eigenvector corresponding to the largest eigenvalue is the main axis
+    main_axis = eigenvectors[:, np.argmax(eigenvalues)]
+
+    # Calculate angle from the horizontal
+    angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
 
-    # Normalize to 0-180 range for consistency
-    # if angle_deg < 0:
-    #     angle_deg += 180
+    # Normalize to 0-180 range
+    if angle_deg < 0:
+        angle_deg += 180
 
     return angle_deg
 
@@ -371,8 +375,8 @@ class PuzzleSolverGUI:
             self.solution_image = cv2.imread(png_path)
             if self.solution_image is not None:
                 self.display_solution_image()
-        except Exception as e:
-            print(f"Error loading solution image: {e}")
+        except Exception:
+            pass
 
     def display_solution_image(self):
         if self.solution_image is not None:
@@ -659,7 +663,7 @@ class PuzzleSolverGUI:
 
         # Get gray image for orientation calculation
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        cv2.GaussianBlur(gray, (5, 5), 0)
 
         min_area = 1000
         filtered_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
@@ -742,7 +746,7 @@ class PuzzleSolverGUI:
             ) = detected_pieces[detected_idx]
             target = target_pieces[target_idx]
 
-            best_target_centroid = target["centroid"]
+            target["centroid"]
             best_target_angle = target["orientation"]
             best_match = target["id"]
             target_pose = target["target_pose"]
@@ -753,11 +757,6 @@ class PuzzleSolverGUI:
                 target_pose[1] - pickup_pose[1],
             )
             rotation_deg = best_target_angle - detected_angle
-
-            # Debug logging
-            # print(
-            #     f"Piece {best_match}: detected_angle={detected_angle:.2f}, target_angle={best_target_angle:.2f}, rotation={rotation:.2f}"
-            # )
 
             solution_map.append(
                 (
@@ -995,18 +994,6 @@ class PuzzleSolverGUI:
             target_y_px = int(
                 TARGET_FRAME_RESOLUTION[1]
                 - (target_pose[1] / TARGET_FRAME_HEIGHT_MM) * TARGET_FRAME_RESOLUTION[1]
-            )
-
-            # Draw a larger circle at the target position for better visibility
-            cv2.circle(highlighted, (target_x_px, target_y_px), 50, (0, 255, 0), 8)
-            cv2.putText(
-                highlighted,
-                f"Piece {piece_id}",
-                (target_x_px - 60, target_y_px - 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.5,
-                (0, 255, 0),
-                3,
             )
 
             # Update solution canvas
