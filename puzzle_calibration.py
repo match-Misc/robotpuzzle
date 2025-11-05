@@ -116,7 +116,8 @@ def main():
         "After calibration, press 's' to start capturing transformed frames, 'q' to quit"
     )
 
-    cv2.namedWindow("Webcam Feed")
+    cv2.namedWindow("Webcam Feed", cv2.WINDOW_NORMAL)
+    cv2.resizeWindow("Webcam Feed", 1920, 1080)
     cv2.setMouseCallback("Webcam Feed", mouse_callback)
 
     while True:
@@ -178,6 +179,12 @@ def main():
                         (1920, 1080),
                         interpolation=cv2.INTER_LINEAR,
                     )
+                cv2.namedWindow("Transformed Puzzle", cv2.WINDOW_NORMAL)
+                cv2.resizeWindow(
+                    "Transformed Puzzle",
+                    display_transformed.shape[1],
+                    display_transformed.shape[0],
+                )
                 cv2.imshow("Transformed Puzzle", display_transformed)
 
         key = cv2.waitKey(1) & 0xFF
