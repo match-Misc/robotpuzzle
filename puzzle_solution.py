@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 
 import cv2
@@ -37,7 +38,7 @@ def get_robust_orientation(contour, image_shape):
     if angle_deg < 0:
         angle_deg += 180
 
-    return angle_deg
+    return angle_deg, main_axis
 
 
 # --- 1. Parse Arguments ---
@@ -45,12 +46,16 @@ parser = argparse.ArgumentParser(description="Detect puzzle pieces in an image."
 parser.add_argument("image_path", help="Path to the input image")
 parser.add_argument("num_pieces", type=int, help="Number of pieces to detect")
 parser.add_argument("--show", action="store_true", help="Display the detection image")
+parser.add_argument(
+    "--savemasks", action="store_true", help="Save colored masks for each piece"
+)
 
 args = parser.parse_args()
 
 image_path = args.image_path
 num_pieces = args.num_pieces
 show_image = args.show
+save_masks = args.savemasks
 image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
 
 if image is None:
@@ -106,7 +111,9 @@ else:
             hu_moments = cv2.HuMoments(M).flatten().tolist()
 
             # Calculate orientation using robust moments method
-            angle = get_robust_orientation(cnt, thresh.shape)
+            angle, main_axis = get_robust_orientation(cnt, thresh.shape)
+
+            color = tuple(np.random.randint(50, 220, 3).tolist())
 
             # Collect piece data
             piece_data = {
@@ -116,6 +123,8 @@ else:
                 "perimeter": perimeter,
                 "hu_moments": hu_moments,
                 "orientation": angle,
+                "main_axis": main_axis.tolist(),
+                "color": color,
             }
             pieces_data.append(piece_data)
 
@@ -128,11 +137,18 @@ else:
 
             # --- 6. Visualize the Results ---
             # Fill the entire shape area with a unique color
-            color = tuple(np.random.randint(50, 220, 3).tolist())
             cv2.drawContours(output_image, [cnt], -1, color, -1)  # Fill the shape
 
             # Draw the centroid as a red circle
             cv2.circle(output_image, (cx, cy), 10, (0, 0, 255), -1)
+
+            # Draw the PCA axis as a green line
+            axis_length = 150  # Length of the axis line
+            end_point = (
+                int(cx + main_axis[0] * axis_length),
+                int(cy + main_axis[1] * axis_length),
+            )
+            cv2.line(output_image, (cx, cy), end_point, (0, 255, 0), 3)
 
             # Put the shape number text
             cv2.putText(
@@ -156,7 +172,26 @@ else:
         json.dump(pieces_data, f, indent=4)
     print(f"\nJSON data saved to '{json_filename}'.")
 
-    # --- 8. Display Image if Requested ---
+    # --- 8. Save Colored Masks ---
+    if save_masks:
+        # Ensure configs directory exists
+        os.makedirs("configs", exist_ok=True)
+
+        for piece in pieces_data:
+            piece_id = piece["id"]
+            color = piece["color"]
+            # Create a colored mask with transparent background
+            rgba = np.zeros((thresh.shape[0], thresh.shape[1], 4), dtype=np.uint8)
+            mask = np.zeros_like(thresh, dtype=np.uint8)
+            cv2.drawContours(mask, [shapes[piece_id - 1]], -1, 255, -1)
+            rgba[mask == 255] = [color[0], color[1], color[2], 255]
+
+            # Save the mask as an image
+            mask_filename = f"configs/piece_{piece_id}_mask.png"
+            cv2.imwrite(mask_filename, rgba)
+            print(f"Colored mask for piece {piece_id} saved to '{mask_filename}'.")
+
+    # --- 9. Display Image if Requested ---
     if show_image:
         # Resize to half size for better screen fit
         display_image = cv2.resize(output_image, (0, 0), fx=0.5, fy=0.5)
