@@ -1,0 +1,20 @@
+[project]
+name = "robotpuzzle"
+version = "0.1.0"
+description = "Puzzle solving robot application"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "opencv-python",
+    "numpy",
+    "customtkinter",
+    "Pillow",
+    "scipy",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
