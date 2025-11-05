@@ -1,4 +1,5 @@
 import argparse
+import base64
 import json
 import os
 import sys
@@ -65,10 +66,6 @@ def get_robust_orientation(contour, image_shape):
     # Calculate angle from the horizontal
     angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
-
-    # Ensure angle is in [0, 180) range
-    # if angle_deg < 0:
-    #     angle_deg += 180
 
     return angle_deg, main_axis
 
@@ -147,6 +144,14 @@ else:
 
             color = tuple(np.random.randint(50, 220, 3).tolist())
 
+            # Create mask for the piece
+            mask = np.zeros_like(thresh, dtype=np.uint8)
+            cv2.drawContours(mask, [cnt], -1, 255, -1)
+
+            # Encode mask as base64 string
+            _, mask_encoded = cv2.imencode(".png", mask)
+            mask_base64 = base64.b64encode(mask_encoded.tobytes()).decode("utf-8")
+
             # Collect piece data
             piece_data = {
                 "id": shape_number,
@@ -157,6 +162,7 @@ else:
                 "orientation": angle,
                 "main_axis": main_axis.tolist(),
                 "color": color,
+                "mask": mask_base64,
             }
             pieces_data.append(piece_data)
 

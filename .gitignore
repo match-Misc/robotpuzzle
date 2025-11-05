@@ -109,8 +109,8 @@ dmypy.json
 .pyre/
 
 # Project-specific ignores
-configs/
-Solutions/
+# configs/
+# Solutions/
 *.pyc
 __pycache__/
 .ruff_cache/
