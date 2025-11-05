@@ -9,12 +9,17 @@ import numpy as np
 
 def get_robust_orientation(contour, image_shape):
     """
-    Calculate orientation using PCA (Principal Component Analysis) on contour points.
+    Calculate orientation using PCA (Principal Component Analysis) on the complete mask points.
     This method finds the main axis of the shape without assuming symmetry.
     Uses skewness-based disambiguation for consistent orientation.
     """
-    # Convert contour to numpy array of points
-    points = contour.reshape(-1, 2).astype(np.float64)
+    # Create a filled mask from the contour
+    mask = np.zeros(image_shape, dtype=np.uint8)
+    cv2.drawContours(mask, [contour], -1, 255, -1)
+
+    # Extract all points from the mask (where mask == 255)
+    y_coords, x_coords = np.where(mask == 255)
+    points = np.column_stack((x_coords, y_coords)).astype(np.float64)  # (x, y) format
 
     # Calculate mean
     mean = np.mean(points, axis=0)
@@ -31,12 +36,29 @@ def get_robust_orientation(contour, image_shape):
     # Sort eigenvectors by eigenvalues in descending order
     sort_indices = np.argsort(eigenvalues)[::-1]
     v1 = eigenvectors[:, sort_indices[0]]
+    v2 = eigenvectors[:, sort_indices[1]]
 
-    # Disambiguate direction using skewness
-    projections = centered.dot(v1)
-    skewness = np.sum(projections**3)
-    if skewness < 0:
-        v1 = -v1
+    # Ensure consistent basis: right-handed coordinate system
+    det = np.linalg.det(np.column_stack([v1, v2]))
+    if det < 0:
+        v2 = -v2
+
+    # Calculate skewness along both axes
+    projections_v1 = centered.dot(v1)
+    skew_v1 = np.sum(projections_v1**3)
+    projections_v2 = centered.dot(v2)
+    skew_v2 = np.sum(projections_v2**3)
+
+    # Determine the dominant axis and disambiguate
+    if abs(skew_v1) > abs(skew_v2):
+        # Primary axis is dominant
+        if skew_v1 < 0:
+            v1 = -v1
+    else:
+        # Secondary axis is dominant
+        if skew_v2 < 0:
+            # Flip the entire coordinate system 180 degrees
+            v1 = -v1
 
     main_axis = v1
 
@@ -45,8 +67,8 @@ def get_robust_orientation(contour, image_shape):
     angle_deg = np.degrees(angle_rad)
 
     # Ensure angle is in [0, 180) range
-    if angle_deg < 0:
-        angle_deg += 180
+    # if angle_deg < 0:
+    #     angle_deg += 180
 
     return angle_deg, main_axis
 
