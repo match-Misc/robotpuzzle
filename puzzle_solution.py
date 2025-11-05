@@ -11,6 +11,7 @@ def get_robust_orientation(contour, image_shape):
     """
     Calculate orientation using PCA (Principal Component Analysis) on contour points.
     This method finds the main axis of the shape without assuming symmetry.
+    Uses skewness-based disambiguation for consistent orientation.
     """
     # Convert contour to numpy array of points
     points = contour.reshape(-1, 2).astype(np.float64)
@@ -25,16 +26,25 @@ def get_robust_orientation(contour, image_shape):
     cov = np.cov(centered.T)
 
     # Get eigenvalues and eigenvectors
-    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+    eigenvalues, eigenvectors = np.linalg.eig(cov)
 
-    # The eigenvector corresponding to the largest eigenvalue is the main axis
-    main_axis = eigenvectors[:, np.argmax(eigenvalues)]
+    # Sort eigenvectors by eigenvalues in descending order
+    sort_indices = np.argsort(eigenvalues)[::-1]
+    v1 = eigenvectors[:, sort_indices[0]]
+
+    # Disambiguate direction using skewness
+    projections = centered.dot(v1)
+    skewness = np.sum(projections**3)
+    if skewness < 0:
+        v1 = -v1
+
+    main_axis = v1
 
     # Calculate angle from the horizontal
     angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
 
-    # Normalize to 0-180 range
+    # Ensure angle is in [0, 180) range
     if angle_deg < 0:
         angle_deg += 180
 

@@ -27,6 +27,7 @@ def get_robust_orientation(contour, image_shape):
     """
     Calculate orientation using PCA (Principal Component Analysis) on contour points.
     This method finds the main axis of the shape without assuming symmetry.
+    Uses skewness-based disambiguation for consistent orientation.
     """
     # Convert contour to numpy array of points
     points = contour.reshape(-1, 2).astype(np.float64)
@@ -41,16 +42,25 @@ def get_robust_orientation(contour, image_shape):
     cov = np.cov(centered.T)
 
     # Get eigenvalues and eigenvectors
-    eigenvalues, eigenvectors = np.linalg.eigh(cov)
+    eigenvalues, eigenvectors = np.linalg.eig(cov)
 
-    # The eigenvector corresponding to the largest eigenvalue is the main axis
-    main_axis = eigenvectors[:, np.argmax(eigenvalues)]
+    # Sort eigenvectors by eigenvalues in descending order
+    sort_indices = np.argsort(eigenvalues)[::-1]
+    v1 = eigenvectors[:, sort_indices[0]]
+
+    # Disambiguate direction using skewness
+    projections = centered.dot(v1)
+    skewness = np.sum(projections**3)
+    if skewness < 0:
+        v1 = -v1
+
+    main_axis = v1
 
     # Calculate angle from the horizontal
     angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
 
-    # Normalize to 0-180 range
+    # Ensure angle is in [0, 180) range
     if angle_deg < 0:
         angle_deg += 180
 
@@ -400,6 +410,24 @@ class PuzzleSolverGUI:
                         cv2.drawContours(
                             overlay, [transformed_cnt], -1, self.piece_colors[i], -1
                         )
+
+            # Draw PCA axes for target pieces
+            if self.target_pieces:
+                for piece in self.target_pieces:
+                    centroid_px = piece["centroid"]
+                    orientation = piece["orientation"]
+                    cx, cy = centroid_px
+                    length = 100  # pixels, longer for visibility
+                    end_x = int(cx + length * np.cos(np.radians(orientation)))
+                    end_y = int(cy + length * np.sin(np.radians(orientation)))
+                    cv2.arrowedLine(
+                        overlay,
+                        (cx, cy),
+                        (end_x, end_y),
+                        (0, 0, 0),
+                        5,
+                        tipLength=0.1,
+                    )
 
             # Resize to fit canvas
             canvas_width = self.solution_canvas.winfo_width()
@@ -756,7 +784,12 @@ class PuzzleSolverGUI:
                 target_pose[0] - pickup_pose[0],
                 target_pose[1] - pickup_pose[1],
             )
-            rotation_deg = best_target_angle - detected_angle
+            # Normalize angles to [0, 180) range for proper rotation calculation
+            detected_angle_norm = detected_angle % 180
+            best_target_angle_norm = best_target_angle % 180
+            rotation_deg = -(
+                best_target_angle_norm - detected_angle_norm
+            )  # Invert sign for counter-clockwise positive
 
             solution_map.append(
                 (
@@ -882,6 +915,20 @@ class PuzzleSolverGUI:
             for i, (cnt, _, _, _, _) in enumerate(self.detected_pieces):
                 cv2.drawContours(highlighted, [cnt], -1, self.piece_colors[i], -1)
 
+            # Draw PCA axes for detected pieces
+            for i, (cnt, _, (cx, cy), angle, _) in enumerate(self.detected_pieces):
+                length = 100  # pixels, longer for visibility
+                end_x = int(cx + length * np.cos(np.radians(angle)))
+                end_y = int(cy + length * np.sin(np.radians(angle)))
+                cv2.arrowedLine(
+                    highlighted,
+                    (cx, cy),
+                    (end_x, end_y),
+                    (0, 0, 0),
+                    5,
+                    tipLength=0.1,
+                )
+
             # Resize to fit canvas
             canvas_width = self.captured_canvas.winfo_width()
             canvas_height = self.captured_canvas.winfo_height()
@@ -985,6 +1032,24 @@ class PuzzleSolverGUI:
                     )
                     cv2.drawContours(
                         highlighted, [transformed_cnt], -1, self.piece_colors[i], -1
+                    )
+
+            # Draw PCA axes for target pieces
+            if self.target_pieces:
+                for piece in self.target_pieces:
+                    centroid_px = piece["centroid"]
+                    orientation = piece["orientation"]
+                    cx, cy = centroid_px
+                    length = 100  # pixels, longer for visibility
+                    end_x = int(cx + length * np.cos(np.radians(orientation)))
+                    end_y = int(cy + length * np.sin(np.radians(orientation)))
+                    cv2.arrowedLine(
+                        highlighted,
+                        (cx, cy),
+                        (end_x, end_y),
+                        (0, 0, 0),
+                        5,
+                        tipLength=0.1,
                     )
 
             # Convert target pose back to pixels for additional highlighting
