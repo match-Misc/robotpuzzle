@@ -89,6 +89,17 @@ def get_robust_orientation(contour, image_shape):
     return angle_deg
 
 
+def compute_iou(mask1, mask2):
+    """
+    Compute Intersection over Union (IoU) between two binary masks.
+    """
+    intersection = np.logical_and(mask1 > 0, mask2 > 0).sum()
+    union = np.logical_or(mask1 > 0, mask2 > 0).sum()
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
 # Set appearance mode and color theme
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -419,7 +430,7 @@ class PuzzleSolverGUI:
             if self.detected_pieces and self.solution_map and self.piece_colors:
                 for i, (cnt, _, _, _, pickup_pose) in enumerate(self.detected_pieces):
                     if i < len(self.solution_map):
-                        _, target_pose, _, _, _ = self.solution_map[i]
+                        _, target_pose, _, _, _, _ = self.solution_map[i]
                         # Transform contour to target space with detected orientation (no scaling for initial display)
                         transformed_cnt = self.transform_contour(
                             cnt,
@@ -803,13 +814,56 @@ class PuzzleSolverGUI:
             best_match = target["id"]
             target_pose = target["target_pose"]
 
+            # Load target mask for IoU computation
+            target_mask_path = f"configs/piece_{best_match}_mask.png"
+            target_mask = cv2.imread(target_mask_path, cv2.IMREAD_GRAYSCALE)
+            if target_mask is None:
+                # Fallback if mask not found
+                iou_normal = 0.0
+                iou_flipped = 0.0
+            else:
+                # Create detected mask from contour
+                detected_mask = np.zeros_like(target_mask)
+                cv2.drawContours(detected_mask, [detected_cnt], -1, 255, -1)
+
+                # Compute IoU for normal orientation
+                iou_normal = compute_iou(detected_mask, target_mask)
+
+                # Compute IoU for 180° flipped orientation
+                detected_mask_flipped = cv2.rotate(detected_mask, cv2.ROTATE_180)
+                iou_flipped = compute_iou(detected_mask_flipped, target_mask)
+
+            # Choose the orientation with higher IoU
+            if iou_flipped > iou_normal:
+                max_iou = iou_flipped
+                corrected_angle = (detected_angle + 180) % 360
+                corrected_pickup_pose = (
+                    pickup_pose[0],
+                    pickup_pose[1],
+                    pickup_pose[2],
+                    corrected_angle,
+                )
+            else:
+                max_iou = iou_normal
+                corrected_angle = detected_angle
+                corrected_pickup_pose = pickup_pose
+
+            # Update detected_pieces with corrected angle
+            detected_pieces[detected_idx] = (
+                detected_cnt,
+                detected_hu,
+                detected_centroid,
+                corrected_angle,
+                corrected_pickup_pose,
+            )
+
             # Compute transformation in mm and degrees
             translation_mm = (
-                target_pose[0] - pickup_pose[0],
-                target_pose[1] - pickup_pose[1],
+                target_pose[0] - corrected_pickup_pose[0],
+                target_pose[1] - corrected_pickup_pose[1],
             )
             # Normalize angles to [0, 180) range for proper rotation calculation
-            detected_angle_norm = detected_angle % 180
+            detected_angle_norm = corrected_angle % 180
             best_target_angle_norm = best_target_angle % 180
             rotation_deg = -(
                 best_target_angle_norm - detected_angle_norm
@@ -817,11 +871,12 @@ class PuzzleSolverGUI:
 
             solution_map.append(
                 (
-                    pickup_pose,
+                    corrected_pickup_pose,
                     target_pose,
                     translation_mm,
                     rotation_deg,
                     best_match,
+                    max_iou,
                 )
             )
 
@@ -1028,7 +1083,9 @@ class PuzzleSolverGUI:
         if piece_index >= len(self.solution_map) or not self.piece_colors:
             return
 
-        pickup_pose, target_pose, _, _, piece_id = self.solution_map[piece_index]
+        pickup_pose, target_pose, _, _, piece_id, max_iou = self.solution_map[
+            piece_index
+        ]
         cnt, _, _, _, _ = self.detected_pieces[piece_index]
 
         if self.solution_image is not None:
@@ -1039,7 +1096,7 @@ class PuzzleSolverGUI:
                 self.detected_pieces
             ):
                 if i < len(self.solution_map):
-                    _, other_target_pose, _, _, _ = self.solution_map[i]
+                    _, other_target_pose, _, _, _, _ = self.solution_map[i]
                     # For the hovered piece, use target orientation and apply scaling; for others, use detected orientation without scaling
                     use_target = i == piece_index
                     apply_scaling = i == piece_index
@@ -1110,14 +1167,14 @@ class PuzzleSolverGUI:
         if piece_index >= len(self.solution_map):
             return
 
-        pickup_pose, target_pose, translation_mm, rotation_deg, piece_id = (
+        pickup_pose, target_pose, translation_mm, rotation_deg, piece_id, max_iou = (
             self.solution_map[piece_index]
         )
 
         info_text = (
             f"Piece {piece_id}: Pickup ({pickup_pose[0]:.1f}, {pickup_pose[1]:.1f}, {pickup_pose[2]:.1f}, {pickup_pose[3]:.1f}°) -> "
             f"Target ({target_pose[0]:.1f}, {target_pose[1]:.1f}, {target_pose[2]:.1f}, {target_pose[3]:.1f}°) | "
-            f"Translate ({translation_mm[0]:.1f}, {translation_mm[1]:.1f}) mm | Rotate {rotation_deg:.1f}°"
+            f"Translate ({translation_mm[0]:.1f}, {translation_mm[1]:.1f}) mm | Rotate {rotation_deg:.1f}° | IoU: {max_iou:.3f}"
         )
 
         self.info_label.configure(text=info_text)

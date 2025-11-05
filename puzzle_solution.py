@@ -1,5 +1,4 @@
 import argparse
-import base64
 import json
 import os
 import sys
@@ -144,14 +143,6 @@ else:
 
             color = tuple(np.random.randint(50, 220, 3).tolist())
 
-            # Create mask for the piece
-            mask = np.zeros_like(thresh, dtype=np.uint8)
-            cv2.drawContours(mask, [cnt], -1, 255, -1)
-
-            # Encode mask as base64 string
-            _, mask_encoded = cv2.imencode(".png", mask)
-            mask_base64 = base64.b64encode(mask_encoded.tobytes()).decode("utf-8")
-
             # Collect piece data
             piece_data = {
                 "id": shape_number,
@@ -162,7 +153,6 @@ else:
                 "orientation": angle,
                 "main_axis": main_axis.tolist(),
                 "color": color,
-                "mask": mask_base64,
             }
             pieces_data.append(piece_data)
 
@@ -204,30 +194,72 @@ else:
         )
         sys.exit(1)
 
+    # Ensure configs directory exists
+    os.makedirs("configs", exist_ok=True)
+
     # --- 7. Output JSON ---
     json_filename = f"configs/Puzzle_{num_pieces}.json"
     with open(json_filename, "w") as f:
         json.dump(pieces_data, f, indent=4)
     print(f"\nJSON data saved to '{json_filename}'.")
 
-    # --- 8. Save Colored Masks ---
-    if save_masks:
-        # Ensure configs directory exists
-        os.makedirs("configs", exist_ok=True)
+    # --- 8. Save Colored Masks and Individual Piece Images ---
+    for piece in pieces_data:
+        piece_id = piece["id"]
+        color = piece["color"]
+        cnt = shapes[piece_id - 1]
 
-        for piece in pieces_data:
-            piece_id = piece["id"]
-            color = piece["color"]
-            # Create a colored mask with transparent background
-            rgba = np.zeros((thresh.shape[0], thresh.shape[1], 4), dtype=np.uint8)
-            mask = np.zeros_like(thresh, dtype=np.uint8)
-            cv2.drawContours(mask, [shapes[piece_id - 1]], -1, 255, -1)
-            rgba[mask == 255] = [color[0], color[1], color[2], 255]
+        # Create a colored mask with transparent background
+        rgba = np.zeros((thresh.shape[0], thresh.shape[1], 4), dtype=np.uint8)
+        mask = np.zeros_like(thresh, dtype=np.uint8)
+        cv2.drawContours(mask, [cnt], -1, 255, -1)
+        rgba[mask == 255] = [color[0], color[1], color[2], 255]
 
-            # Save the mask as an image
-            mask_filename = f"configs/piece_{piece_id}_mask.png"
-            cv2.imwrite(mask_filename, rgba)
-            print(f"Colored mask for piece {piece_id} saved to '{mask_filename}'.")
+        # Save the mask as an image
+        mask_filename = f"configs/piece_{piece_id}_mask.png"
+        cv2.imwrite(mask_filename, rgba)
+        print(f"Colored mask for piece {piece_id} saved to '{mask_filename}'.")
+
+        # Create individual piece image
+        piece_image = np.zeros_like(output_image)  # Same size as original
+        # Fill the shape with color
+        cv2.drawContours(piece_image, [cnt], -1, color, -1)
+
+        # Draw centroid
+        cx, cy = piece["centroid"]
+        cv2.circle(piece_image, (cx, cy), 10, (0, 0, 255), -1)
+
+        # Draw main axis
+        main_axis = np.array(piece["main_axis"])
+        axis_length = 150
+        end_point = (
+            int(cx + main_axis[0] * axis_length),
+            int(cy + main_axis[1] * axis_length),
+        )
+        cv2.line(piece_image, (cx, cy), end_point, (0, 255, 0), 3)
+
+        # Put the shape number
+        cv2.putText(
+            piece_image,
+            f"#{piece_id}",
+            (cx - 25, cy + 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 255, 255),
+            2,
+        )
+
+        # Save the individual piece image
+        piece_filename = f"configs/piece_{piece_id}.png"
+        cv2.imwrite(piece_filename, piece_image)
+        print(
+            f"Individual piece image for piece {piece_id} saved to '{piece_filename}'."
+        )
+
+    # --- 9. Save Detected Pieces Image ---
+    image_filename = f"configs/detected_pieces.png"
+    cv2.imwrite(image_filename, output_image)
+    print(f"Detected pieces image saved to '{image_filename}'.")
 
     # --- 9. Display Image if Requested ---
     if show_image:
