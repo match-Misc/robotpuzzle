@@ -12,20 +12,24 @@ output_size = None
 
 
 def mouse_callback(event, x, y, flags, param):
-    global points, selecting, frame_copy
+    global points, selecting
     if event == cv2.EVENT_LBUTTONDOWN and selecting:
-        # Scale points back to original 4K coordinates since display is resized
-        scale_x = 3840 / 1920  # Original width / display width
-        scale_y = 2160 / 1080  # Original height / display height
-        original_x = int(x * scale_x)
-        original_y = int(y * scale_y)
-        points.append((original_x, original_y))
-        print(
-            f"Point {len(points)}: ({original_x}, {original_y}) [from display: ({x}, {y})]"
-        )
-        if len(points) == 4:
-            selecting = False
-            print("All 4 points selected. Processing...")
+        rect = cv2.getWindowImageRect("Webcam Feed")
+        if rect is not None:
+            img_x = x - rect[0]
+            img_y = y - rect[1]
+            if 0 <= img_x < rect[2] and 0 <= img_y < rect[3]:
+                scale_x = 3840 / rect[2]
+                scale_y = 2160 / rect[3]
+                original_x = int(img_x * scale_x)
+                original_y = int(img_y * scale_y)
+                points.append((original_x, original_y))
+                print(
+                    f"Point {len(points)}: ({original_x}, {original_y}) [from display: ({img_x}, {img_y})]"
+                )
+                if len(points) == 4:
+                    selecting = False
+                    print("All 4 points selected. Processing...")
 
 
 def set_webcam_settings(cap, brightness=50, contrast=100, saturation=0):
@@ -135,35 +139,35 @@ def main():
 
         if not calibrated:
             # Draw selected points with highlighting during calibration
-            for i, pt in enumerate(points):
-                # Scale points to display coordinates for drawing
-                scale_x = 1920 / 3840  # Display width / original width
-                scale_y = 1080 / 2160  # Display height / original height
-                display_pt = (int(pt[0] * scale_x), int(pt[1] * scale_y))
+            rect = cv2.getWindowImageRect("Webcam Feed")
+            if rect is not None:
+                scale_x = rect[2] / 3840
+                scale_y = rect[3] / 2160
+                for i, pt in enumerate(points):
+                    # Scale points to display coordinates for drawing
+                    display_pt = (int(pt[0] * scale_x), int(pt[1] * scale_y))
 
-                cv2.circle(display_frame, display_pt, 10, (0, 255, 0), 2)
-                cv2.circle(display_frame, display_pt, 5, (0, 255, 0), -1)
-                cv2.putText(
-                    display_frame,
-                    str(i + 1),
-                    (display_pt[0] + 15, display_pt[1] - 15),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (0, 255, 0),
-                    2,
-                )
+                    cv2.circle(display_frame, display_pt, 10, (0, 255, 0), 2)
+                    cv2.circle(display_frame, display_pt, 5, (0, 255, 0), -1)
+                    cv2.putText(
+                        display_frame,
+                        str(i + 1),
+                        (display_pt[0] + 15, display_pt[1] - 15),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8,
+                        (0, 255, 0),
+                        2,
+                    )
 
-            # Draw lines connecting the points if all 4 are selected
-            if len(points) == 4:
-                # Scale points to display coordinates for drawing the polygon
-                scale_x = 1920 / 3840  # Display width / original width
-                scale_y = 1080 / 2160  # Display height / original height
-                display_points = [
-                    (int(pt[0] * scale_x), int(pt[1] * scale_y)) for pt in points
-                ]
-                cv2.polylines(
-                    display_frame, [np.array(display_points)], True, (255, 0, 0), 2
-                )
+                # Draw lines connecting the points if all 4 are selected
+                if len(points) == 4:
+                    # Scale points to display coordinates for drawing the polygon
+                    display_points = [
+                        (int(pt[0] * scale_x), int(pt[1] * scale_y)) for pt in points
+                    ]
+                    cv2.polylines(
+                        display_frame, [np.array(display_points)], True, (255, 0, 0), 2
+                    )
 
         cv2.imshow("Webcam Feed", display_frame)
 
