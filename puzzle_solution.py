@@ -203,22 +203,24 @@ else:
         json.dump(pieces_data, f, indent=4)
     print(f"\nJSON data saved to '{json_filename}'.")
 
-    # --- 8. Save Colored Masks and Individual Piece Images ---
+    # --- 8. Save Binary Masks and Individual Piece Images ---
     for piece in pieces_data:
         piece_id = piece["id"]
         color = piece["color"]
         cnt = shapes[piece_id - 1]
 
-        # Create a colored mask with transparent background
-        rgba = np.zeros((thresh.shape[0], thresh.shape[1], 4), dtype=np.uint8)
+        # Create a binary mask
         mask = np.zeros_like(thresh, dtype=np.uint8)
         cv2.drawContours(mask, [cnt], -1, 255, -1)
-        rgba[mask == 255] = [color[0], color[1], color[2], 255]
 
-        # Save the mask as an image
+        # Get bounding box and crop the mask
+        x, y, w, h = cv2.boundingRect(cnt)
+        cropped_mask = mask[y : y + h, x : x + w]
+
+        # Save the cropped binary mask
         mask_filename = f"configs/piece_{piece_id}_mask.png"
-        cv2.imwrite(mask_filename, rgba)
-        print(f"Colored mask for piece {piece_id} saved to '{mask_filename}'.")
+        cv2.imwrite(mask_filename, cropped_mask)
+        print(f"Binary mask for piece {piece_id} saved to '{mask_filename}'.")
 
         # Create individual piece image
         piece_image = np.zeros_like(output_image)  # Same size as original

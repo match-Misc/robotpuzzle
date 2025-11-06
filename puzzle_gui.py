@@ -814,24 +814,36 @@ class PuzzleSolverGUI:
             best_match = target["id"]
             target_pose = target["target_pose"]
 
-            # Load target mask for IoU computation
+            # Load target mask for IoU computation (already cropped)
             target_mask_path = f"configs/piece_{best_match}_mask.png"
             target_mask = cv2.imread(target_mask_path, cv2.IMREAD_GRAYSCALE)
-            if target_mask is None:
-                # Fallback if mask not found
-                iou_normal = 0.0
-                iou_flipped = 0.0
-            else:
-                # Create detected mask from contour
-                detected_mask = np.zeros_like(target_mask)
-                cv2.drawContours(detected_mask, [detected_cnt], -1, 255, -1)
 
-                # Compute IoU for normal orientation
-                iou_normal = compute_iou(detected_mask, target_mask)
+            # Create detected mask: draw on full image, then crop to bounding box
+            detected_mask_full = np.zeros(
+                (self.stretched_image.shape[0], self.stretched_image.shape[1]),
+                dtype=np.uint8,
+            )
+            cv2.drawContours(detected_mask_full, [detected_cnt], -1, 255, -1)
+            x, y, w, h = cv2.boundingRect(detected_cnt)
+            detected_cropped = detected_mask_full[y : y + h, x : x + w]
 
-                # Compute IoU for 180° flipped orientation
-                detected_mask_flipped = cv2.rotate(detected_mask, cv2.ROTATE_180)
-                iou_flipped = compute_iou(detected_mask_flipped, target_mask)
+            # Resize both masks to 200x200 for comparison
+            target_resized = cv2.resize(
+                target_mask, (200, 200), interpolation=cv2.INTER_NEAREST
+            )
+            detected_resized = cv2.resize(
+                detected_cropped, (200, 200), interpolation=cv2.INTER_NEAREST
+            )
+
+            # Compute IoU for normal orientation
+            iou_normal = compute_iou(detected_resized, target_resized)
+
+            # Compute IoU for 180° flipped orientation
+            detected_cropped_flipped = cv2.rotate(detected_cropped, cv2.ROTATE_180)
+            detected_flipped_resized = cv2.resize(
+                detected_cropped_flipped, (200, 200), interpolation=cv2.INTER_NEAREST
+            )
+            iou_flipped = compute_iou(detected_flipped_resized, target_resized)
 
             # Choose the orientation with higher IoU
             if iou_flipped > iou_normal:
