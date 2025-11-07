@@ -647,9 +647,17 @@ class PuzzleSolverGUI:
             )
             print(f"Matched {len(self.solution_map)} pieces")
 
+            # Load offsetmap
+            print("Loading offsetmap...")
+            offsetmap = self.load_offsetmap(num_pieces)
+            if offsetmap is None:
+                print("Warning: No offsetmap found, proceeding without offsets")
+                offsetmap = None
+
             # Create solved puzzle JSON
             print("Creating solved puzzle JSON...")
             solved_puzzle_data = []
+            solved_puzzle_data_with_offsets = []
             for (
                 pickup_pose,
                 target_pose,
@@ -672,11 +680,31 @@ class PuzzleSolverGUI:
                 }
                 solved_puzzle_data.append(piece_data)
 
+                # Compute offsets if offsetmap is available
+                if offsetmap:
+                    offset_x, offset_y = self.compute_offsets(piece_id, offsetmap)
+                    piece_data_with_offset = piece_data.copy()
+                    piece_data_with_offset["offset_x"] = offset_x
+                    piece_data_with_offset["offset_y"] = offset_y
+                    solved_puzzle_data_with_offsets.append(piece_data_with_offset)
+                else:
+                    solved_puzzle_data_with_offsets.append(piece_data)
+
             # Save to JSON file
             solved_json_path = f"solved_puzzle_{num_pieces}.json"
             with open(solved_json_path, "w") as f:
                 json.dump(solved_puzzle_data, f, indent=2)
             print(f"Saved solved puzzle data to {solved_json_path}")
+
+            # Save to JSON file with offsets
+            solved_json_with_offsets_path = (
+                f"solved_puzzle_{num_pieces}_with_offsets.json"
+            )
+            with open(solved_json_with_offsets_path, "w") as f:
+                json.dump(solved_puzzle_data_with_offsets, f, indent=2)
+            print(
+                f"Saved solved puzzle data with offsets to {solved_json_with_offsets_path}"
+            )
 
             # Update GUI
             print("Updating display...")
@@ -707,6 +735,64 @@ class PuzzleSolverGUI:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return None
+
+    def load_offsetmap(self, num_pieces):
+        try:
+            with open(f"configs/offsetmap_{num_pieces}.json", "r") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
+
+    def compute_offsets(self, piece_id, offsetmap):
+        """
+        Compute x and y offsets for a piece based on its position in the grid relative to the origin.
+        The origin piece (piece 22 in the example) has offset (0, 0).
+        """
+        grid_map = offsetmap["map"]
+        origin = offsetmap["origin"]
+        offset_value = offsetmap["offset"]
+
+        # Find the position of the piece in the grid
+        rows = len(grid_map)
+        cols = len(grid_map[0]) if rows > 0 else 0
+
+        piece_position = None
+        for r in range(rows):
+            for c in range(cols):
+                if grid_map[r][c] == piece_id:
+                    piece_position = (r, c)
+                    break
+            if piece_position:
+                break
+
+        if not piece_position:
+            print(f"Warning: Piece {piece_id} not found in offsetmap")
+            return 0.0, 0.0
+
+        # Find the origin position (piece 24)
+        origin_position = None
+        for r in range(rows):
+            for c in range(cols):
+                if grid_map[r][c] == 24:  # Origin is piece 24
+                    origin_position = (r, c)
+                    break
+            if origin_position:
+                break
+
+        if not origin_position:
+            print("Warning: Origin piece (22) not found in offsetmap")
+            return 0.0, 0.0
+
+        # Calculate relative position
+        rel_row = piece_position[0] - origin_position[0]
+        rel_col = piece_position[1] - origin_position[1]
+
+        # Compute offsets: x increases to the right, y increases upwards
+        # Assuming origin is bottom-left, so positive x is right, positive y is up
+        offset_x = rel_col * offset_value
+        offset_y = rel_row * offset_value
+
+        return offset_x, offset_y
 
     def stretch_to_16_10(self, image):
         height, width = image.shape[:2]
