@@ -148,6 +148,11 @@ class PoseSender:
 
                 self.current_pose_index += 1
 
+                # Check if all poses have been sent
+                if self.current_pose_index == len(self.current_poses):
+                    if self.on_all_poses_sent:
+                        self.on_all_poses_sent()
+
             except Exception as e:
                 print(f"Error sending pose: {e}")
         else:
@@ -188,6 +193,26 @@ class PoseSender:
         self.current_pose_index = 0
         self._send_next_pose_pair()
         return True
+
+    def send_zero_pose(self):
+        """Send a zero pose to the robot"""
+        if not self.client_conn:
+            print("No robot connected")
+            return False
+
+        zero_pose_str = "(0.000000, 0.000000, 0.000000, 0.000000, 0.000000, 0.000000)"
+        try:
+            self.client_conn.sendall((zero_pose_str + "\n").encode("ascii"))
+            print(f"Sent zero pose: {zero_pose_str}")
+
+            # Callback for sent message
+            if self.on_message_sent:
+                self.on_message_sent(zero_pose_str)
+
+            return True
+        except Exception as e:
+            print(f"Error sending zero pose: {e}")
+            return False
 
 
 # Global pose sender instance

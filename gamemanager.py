@@ -422,6 +422,10 @@ class GameManagerGUI:
         """Callback when message received from robot"""
         print(f"Received from robot: {message}")
 
+        # Stop timer if message is "human"
+        if message == "human" and self.stopwatch_active:
+            self.stop_game()
+
     def on_robot_ready(self):
         """Callback when robot sends 'ok'"""
         print("Robot is ready for game")
@@ -437,6 +441,10 @@ class GameManagerGUI:
             self.game_status_label.configure(
                 text="All pieces sent! Complete placement.", text_color="blue"
             )
+            # Send zero pose after all pieces are sent
+            pose_sender.send_zero_pose()
+            # Stop the timer when zero pose is sent (robot has placed all pieces)
+            self.stop_game()
 
     def update_progress(self):
         """Update progress display"""
