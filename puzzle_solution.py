@@ -218,7 +218,7 @@ else:
         cropped_mask = mask[y : y + h, x : x + w]
 
         # Save the cropped binary mask
-        mask_filename = f"configs/piece_{piece_id}_mask.png"
+        mask_filename = f"configs/piece_{num_pieces}_{piece_id}_mask.png"
         cv2.imwrite(mask_filename, cropped_mask)
         print(f"Binary mask for piece {piece_id} saved to '{mask_filename}'.")
 
@@ -252,7 +252,7 @@ else:
         )
 
         # Save the individual piece image
-        piece_filename = f"configs/piece_{piece_id}.png"
+        piece_filename = f"configs/piece_{num_pieces}_{piece_id}.png"
         cv2.imwrite(piece_filename, piece_image)
         print(
             f"Individual piece image for piece {piece_id} saved to '{piece_filename}'."

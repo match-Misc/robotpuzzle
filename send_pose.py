@@ -73,10 +73,6 @@ class PoseSender:
         """Handle communication with connected robot"""
         try:
             with self.client_conn:
-                # Send first pose pair immediately upon connection
-                if self.current_poses:
-                    self._send_next_pose_pair()
-
                 while self.is_running:
                     data = self.client_conn.recv(1024)
                     if not data:
@@ -91,6 +87,8 @@ class PoseSender:
                         self.on_message_received(msg)
 
                     if msg == "placed":
+                        # Short timeout before sending next pose
+                        time.sleep(0.5)
                         # Send next pose pair after receiving "placed"
                         if self.current_poses and self.current_pose_index < len(
                             self.current_poses
@@ -117,7 +115,7 @@ class PoseSender:
             pose = self.current_poses[self.current_pose_index]
             # Create single pose string: (pickup_x, 0, pickup_y, 0, inverted_rotation_rad, 0)
             inverted_rotation_rad = math.radians(-pose["rotation"])
-            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, {pose['target_x']:.6f}, {pose['target_y']:.6f}, {inverted_rotation_rad:.6f})\n"
+            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, {pose['target_x']:.6f}, {pose['target_y']:.6f}, {inverted_rotation_rad:.6f})"
 
             try:
                 self.client_conn.sendall((pose_str + "\n").encode("ascii"))

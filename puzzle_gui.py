@@ -425,7 +425,7 @@ class PuzzleSolverGUI:
                     self.stretched_image, num_pieces
                 )
                 self.solution_map = self.match_pieces(
-                    self.detected_pieces, self.target_pieces
+                    self.detected_pieces, self.target_pieces, num_pieces
                 )
                 self.display_captured_image()
                 self.display_solution_image()
@@ -438,7 +438,7 @@ class PuzzleSolverGUI:
                 )
                 if self.target_pieces:
                     self.solution_map = self.match_pieces(
-                        self.detected_pieces, self.target_pieces
+                        self.detected_pieces, self.target_pieces, num_pieces
                     )
                 self.display_captured_image()
                 self.display_solution_image()
@@ -662,7 +662,7 @@ class PuzzleSolverGUI:
             # Match pieces
             print("Matching pieces...")
             self.solution_map = self.match_pieces(
-                self.detected_pieces, self.target_pieces
+                self.detected_pieces, self.target_pieces, num_pieces
             )
             print(f"Matched {len(self.solution_map)} pieces")
 
@@ -996,7 +996,7 @@ class PuzzleSolverGUI:
         except (FileNotFoundError, json.JSONDecodeError):
             return []
 
-    def match_pieces(self, detected_pieces, target_pieces):
+    def match_pieces(self, detected_pieces, target_pieces, num_pieces):
         import scipy.optimize
 
         # Create cost matrix
@@ -1026,7 +1026,7 @@ class PuzzleSolverGUI:
             target_pose = target["target_pose"]
 
             # Load target mask for IoU computation (already cropped)
-            target_mask_path = f"configs/piece_{best_match}_mask.png"
+            target_mask_path = f"configs/piece_{num_pieces}_{best_match}_mask.png"
             target_mask = cv2.imread(target_mask_path, cv2.IMREAD_GRAYSCALE)
 
             # Calculate rotation to align detected piece with target orientation
@@ -1632,7 +1632,7 @@ class PuzzleSolverGUI:
 
                 # Match pieces
                 self.solution_map = self.match_pieces(
-                    self.detected_pieces, target_pieces
+                    self.detected_pieces, target_pieces, num_pieces
                 )
 
                 # Update GUI

@@ -374,7 +374,7 @@ class GameManagerGUI:
         # Start stopwatch thread
         threading.Thread(target=self._stopwatch_thread, daemon=True).start()
 
-        # Start sending poses
+        # Start sending poses after countdown finishes
         pose_sender.start_sending_poses()
 
     def _stopwatch_thread(self):
