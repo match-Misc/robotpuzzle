@@ -153,14 +153,28 @@ class PuzzleSolverGUI:
         control_frame = ctk.CTkFrame(main_frame)
         control_frame.pack(fill="x", padx=10, pady=10)
 
-        # Number of pieces input
+        # Number of pieces selection
         pieces_label = ctk.CTkLabel(control_frame, text="Number of Pieces:")
         pieces_label.pack(side="left", padx=(10, 5))
 
-        self.pieces_entry = ctk.CTkEntry(
-            control_frame, textvariable=self.num_pieces, width=100
+        # Radio buttons for 12 or 24 pieces
+        self.pieces_radio_12 = ctk.CTkRadioButton(
+            control_frame,
+            text="12",
+            variable=self.num_pieces,
+            value="12",
+            command=self.on_pieces_change,
         )
-        self.pieces_entry.pack(side="left", padx=(0, 10))
+        self.pieces_radio_12.pack(side="left", padx=(0, 5))
+
+        self.pieces_radio_24 = ctk.CTkRadioButton(
+            control_frame,
+            text="24",
+            variable=self.num_pieces,
+            value="24",
+            command=self.on_pieces_change,
+        )
+        self.pieces_radio_24.pack(side="left", padx=(0, 10))
 
         # Check solution button
         self.check_btn = ctk.CTkButton(
@@ -438,6 +452,11 @@ class PuzzleSolverGUI:
         # Update threshold display and piece detection if we have an image
         if self.stretched_image is not None:
             self.on_threshold_change(self.threshold_value.get())
+
+    def on_pieces_change(self):
+        """Callback when number of pieces radio button is changed."""
+        # Check if solution exists for the selected number of pieces
+        self.check_solution_exists()
 
     def check_solution_exists(self):
         try:

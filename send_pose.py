@@ -1,0 +1,198 @@
+import json
+import math
+import socket
+import threading
+import time
+
+HOST = "0.0.0.0"  # listen on all network interfaces
+PORT = 30020  # same port the robot connects to
+
+
+class PoseSender:
+    def __init__(self):
+        self.server_socket = None
+        self.client_conn = None
+        self.client_addr = None
+        self.is_running = False
+        self.current_poses = []
+        self.current_pose_index = 0
+        self.on_pose_sent = None  # callback when pose is sent
+        self.on_piece_placed = None  # callback when piece is placed
+        self.on_all_poses_sent = None  # callback when all poses are sent
+        self.on_message_received = None  # callback when message received from robot
+        self.on_message_sent = None  # callback when message sent to robot
+
+    def start_server(self):
+        """Start the pose server in a separate thread"""
+        if self.is_running:
+            return
+
+        self.is_running = True
+        self.server_thread = threading.Thread(target=self._run_server, daemon=True)
+        self.server_thread.start()
+
+    def stop_server(self):
+        """Stop the pose server"""
+        self.is_running = False
+        if self.client_conn:
+            try:
+                self.client_conn.close()
+            except:
+                pass
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except:
+                pass
+
+    def _run_server(self):
+        """Main server loop"""
+        try:
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.server_socket.bind((HOST, PORT))
+            self.server_socket.listen(1)
+            print(f"Pose server listening on {HOST}:{PORT}")
+
+            while self.is_running:
+                try:
+                    self.server_socket.settimeout(1.0)  # Timeout to check is_running
+                    self.client_conn, self.client_addr = self.server_socket.accept()
+                    print(f"Robot connected from {self.client_addr}")
+
+                    self._handle_client()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    break  # Socket was closed
+
+        except Exception as e:
+            print(f"Server error: {e}")
+        finally:
+            self.is_running = False
+
+    def _handle_client(self):
+        """Handle communication with connected robot"""
+        try:
+            with self.client_conn:
+                while self.is_running:
+                    data = self.client_conn.recv(1024)
+                    if not data:
+                        print("Robot disconnected")
+                        break
+
+                    msg = data.decode("ascii").strip()
+                    print(f"Received from robot: {msg}")
+
+                    # Callback for received message
+                    if self.on_message_received:
+                        self.on_message_received(msg)
+
+                    if msg == "placed":
+                        # Robot placed a piece
+                        if self.on_piece_placed:
+                            self.on_piece_placed()
+                        self._send_next_pose()
+                    else:
+                        # Unknown message, send next pose if available
+                        self._send_next_pose()
+
+        except Exception as e:
+            print(f"Client handling error: {e}")
+
+    def _send_next_pose(self):
+        """Send the next pose in the sequence"""
+        if self.current_pose_index < len(self.current_poses):
+            pose = self.current_poses[self.current_pose_index]
+            # Convert rotation from degrees to radians and invert direction
+            rotation_rad = math.radians(-pose["rotation"])
+            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, 0, {rotation_rad:.6f}, 0)"
+
+            try:
+                self.client_conn.sendall((pose_str + "\n").encode("ascii"))
+                print(
+                    f"Sent pose {self.current_pose_index + 1}/{len(self.current_poses)}: {pose_str}"
+                )
+
+                # Callback for sent message
+                if self.on_message_sent:
+                    self.on_message_sent(pose_str)
+
+                if self.on_pose_sent:
+                    self.on_pose_sent(self.current_pose_index)
+
+                self.current_pose_index += 1
+
+                # Check if all poses sent
+                if self.current_pose_index >= len(self.current_poses):
+                    if self.on_all_poses_sent:
+                        self.on_all_poses_sent()
+
+            except Exception as e:
+                print(f"Error sending pose: {e}")
+        else:
+            print("No more poses to send")
+
+    def load_poses_from_json(self, json_file, num_pieces=None):
+        """Load poses from JSON file, optionally limiting to first N pieces"""
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+
+            self.current_poses = data
+            if num_pieces and num_pieces < len(data):
+                self.current_poses = data[:num_pieces]
+
+            self.current_pose_index = 0
+            print(f"Loaded {len(self.current_poses)} poses from {json_file}")
+            return True
+
+        except Exception as e:
+            print(f"Error loading poses: {e}")
+            return False
+
+    def start_sending_poses(self):
+        """Start sending poses to robot"""
+        if not self.client_conn:
+            print("No robot connected")
+            return False
+
+        self.current_pose_index = 0
+        self._send_next_pose()
+        return True
+
+
+# Global pose sender instance
+pose_sender = PoseSender()
+
+
+def start_pose_server():
+    """Start the pose server (for backward compatibility)"""
+    pose_sender.start_server()
+
+
+def stop_pose_server():
+    """Stop the pose server"""
+    pose_sender.stop_server()
+
+
+def load_poses(json_file, num_pieces=None):
+    """Load poses from JSON file"""
+    return pose_sender.load_poses_from_json(json_file, num_pieces)
+
+
+def send_poses():
+    """Start sending poses"""
+    return pose_sender.start_sending_poses()
+
+
+# Backward compatibility - if run directly, start server
+if __name__ == "__main__":
+    pose_sender.start_server()
+
+    # Keep main thread alive
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        pose_sender.stop_server()

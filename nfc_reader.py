@@ -146,6 +146,45 @@ def parse_nfc_data(line_string):
     return None
 
 
+def scan_nfc_once(timeout=10):
+    """
+    Scans for NFC once and returns the NFC ID and player info.
+    Returns (nfc_id, player_info) or (None, None) if no NFC found within timeout.
+    """
+    serial_connection = None
+    start_time = time.time()
+
+    try:
+        # Attempt to open the serial port
+        serial_connection = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+
+        while time.time() - start_time < timeout:
+            # Read one line of data
+            line_bytes = serial_connection.readline()
+
+            if line_bytes:
+                try:
+                    line_string = line_bytes.decode("utf-8").strip()
+                    nfc_id = parse_nfc_data(line_string)
+                    if nfc_id:
+                        # Query server for player name
+                        player_info = get_player_name_from_server(nfc_id)
+                        return nfc_id, player_info
+                except UnicodeDecodeError:
+                    pass
+
+            time.sleep(0.1)  # Small delay to prevent busy waiting
+
+    except serial.SerialException as e:
+        print(f"Serial error: {e}")
+        return None, None
+    finally:
+        if serial_connection and serial_connection.is_open:
+            serial_connection.close()
+
+    return None, None
+
+
 def read_from_d1_device():
     """
     Connects to the specified serial port and reads data line by line.
