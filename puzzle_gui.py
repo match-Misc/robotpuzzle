@@ -968,12 +968,26 @@ class PuzzleSolverGUI:
                         pickup_pose[2],
                         corrected_angle,
                     )
+                    # Flip the contour by 180 degrees
+                    M_flip = cv2.moments(detected_cnt)
+                    if M_flip["m00"] != 0:
+                        cx_flip = int(M_flip["m10"] / M_flip["m00"])
+                        cy_flip = int(M_flip["m01"] / M_flip["m00"])
+                    else:
+                        cx_flip, cy_flip = 0, 0
+                    rotation_matrix_flip = cv2.getRotationMatrix2D(
+                        (cx_flip, cy_flip), 180, 1.0
+                    )
+                    detected_cnt = cv2.transform(
+                        detected_cnt.reshape(-1, 1, 2).astype(np.float32),
+                        rotation_matrix_flip,
+                    ).astype(np.int32)
                 else:
                     max_iou = iou_normal
                     corrected_angle = detected_angle
                     corrected_pickup_pose = pickup_pose
 
-            # Update detected_pieces with corrected angle
+            # Update detected_pieces with corrected angle and possibly flipped contour
             detected_pieces[detected_idx] = (
                 detected_cnt,
                 detected_hu,
