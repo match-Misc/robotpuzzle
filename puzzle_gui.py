@@ -921,6 +921,12 @@ class PuzzleSolverGUI:
             )
             cv2.drawContours(detected_mask_full, [rotated_cnt], -1, 255, -1)
             x, y, w, h = cv2.boundingRect(rotated_cnt)
+            # Clamp bounding rect to image boundaries
+            img_h, img_w = detected_mask_full.shape
+            x = max(0, x)
+            y = max(0, y)
+            w = min(w, img_w - x)
+            h = min(h, img_h - y)
             detected_cropped = detected_mask_full[y : y + h, x : x + w]
 
             # Check if cropped image is empty
@@ -952,40 +958,20 @@ class PuzzleSolverGUI:
                 )
                 iou_flipped = compute_iou(detected_flipped_resized, target_resized)
 
-                # Choose the orientation with higher IoU (only if not empty)
-                if detected_cropped.size > 0 and w > 0 and h > 0:
-                    if iou_flipped > iou_normal:
-                        max_iou = iou_flipped
-                        corrected_angle = (detected_angle + 180) % 360
-                        corrected_pickup_pose = (
-                            pickup_pose[0],
-                            pickup_pose[1],
-                            pickup_pose[2],
-                            corrected_angle,
-                        )
-                    else:
-                        max_iou = iou_normal
-                        corrected_angle = detected_angle
-                        corrected_pickup_pose = pickup_pose
+                # Choose the orientation with higher IoU
+                if iou_flipped > iou_normal:
+                    max_iou = iou_flipped
+                    corrected_angle = (detected_angle + 180) % 360
+                    corrected_pickup_pose = (
+                        pickup_pose[0],
+                        pickup_pose[1],
+                        pickup_pose[2],
+                        corrected_angle,
+                    )
                 else:
-                    max_iou = 0.0
+                    max_iou = iou_normal
                     corrected_angle = detected_angle
                     corrected_pickup_pose = pickup_pose
-
-            # Choose the orientation with higher IoU
-            if iou_flipped > iou_normal:
-                max_iou = iou_flipped
-                corrected_angle = (detected_angle + 180) % 360
-                corrected_pickup_pose = (
-                    pickup_pose[0],
-                    pickup_pose[1],
-                    pickup_pose[2],
-                    corrected_angle,
-                )
-            else:
-                max_iou = iou_normal
-                corrected_angle = detected_angle
-                corrected_pickup_pose = pickup_pose
 
             # Update detected_pieces with corrected angle
             detected_pieces[detected_idx] = (
