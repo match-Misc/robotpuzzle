@@ -1,41 +1,38 @@
-import socket
+import send_pose
 
-HOST = "0.0.0.0"  # listen on all network interfaces
-PORT = 30020  # same port the robot connects to
 
-# Predefined responses
-POINTS = {
-    "Point_1": "(0.4, 0, 0.5, 0, -3.14159, 0)",
-    "Point_2": "(0.3, 0.5, 0.5, 0, 3.14159, 0)",
-    "Point_3": "(0, 0.6, 0.5, 0, 3.14159, 0)",
-}
+def on_message_received(msg):
+    """Callback for received messages - print raw data"""
+    print(f"RAW RECEIVED: {repr(msg)}")
 
-print(f"Opening server on {HOST}:{PORT}")
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
-    server.listen(1)
-    print("Waiting for robot connection...")
+def on_message_sent(msg):
+    """Callback for sent messages - print raw data"""
+    print(f"RAW SENT: {repr(msg)}")
 
-    while True:
-        conn, addr = server.accept()
-        print(f"Robot connected from {addr}")
 
-        with conn:
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    print("Robot closed the connection.")
-                    break
+def main():
+    # Load poses from the JSON file
+    if not send_pose.load_poses("solved_puzzle_24_with_offsets.json"):
+        print("Failed to load poses")
+        return
 
-                # Decode ASCII message
-                msg = data.decode("ascii").strip()
-                print(f"Received from robot: {msg}")
+    # Set up callbacks for raw data printing
+    send_pose.pose_sender.on_message_received = on_message_received
+    send_pose.pose_sender.on_message_sent = on_message_sent
 
-                # Choose a reply based on the message
-                if msg == "2":
-                    print(f"Sending response: {POINTS['Point_2']}")
-                    conn.sendall((POINTS["Point_2"] + "\n").encode("ascii"))
-                else:
-                    print("Unknown request, sending nothing.")
+    # Start the pose server
+    send_pose.start_pose_server()
+
+    # Keep the main thread alive
+    try:
+        while True:
+            import time
+
+            time.sleep(1)
+    except KeyboardInterrupt:
+        send_pose.stop_pose_server()
+
+
+if __name__ == "__main__":
+    main()

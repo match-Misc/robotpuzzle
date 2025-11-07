@@ -15,10 +15,8 @@ class PoseSender:
         self.client_addr = None
         self.is_running = False
         self.current_poses = []
-        self.current_pose_index = 0
+        self.points = {}
         self.on_pose_sent = None  # callback when pose is sent
-        self.on_piece_placed = None  # callback when piece is placed
-        self.on_all_poses_sent = None  # callback when all poses are sent
         self.on_message_received = None  # callback when message received from robot
         self.on_message_sent = None  # callback when message sent to robot
 
@@ -75,6 +73,10 @@ class PoseSender:
         """Handle communication with connected robot"""
         try:
             with self.client_conn:
+                # Send first pose pair immediately upon connection
+                if self.current_poses:
+                    self._send_next_pose_pair()
+
                 while self.is_running:
                     data = self.client_conn.recv(1024)
                     if not data:
@@ -89,24 +91,33 @@ class PoseSender:
                         self.on_message_received(msg)
 
                     if msg == "placed":
-                        # Robot placed a piece
-                        if self.on_piece_placed:
-                            self.on_piece_placed()
-                        self._send_next_pose()
+                        # Send next pose pair after receiving "placed"
+                        if self.current_poses and self.current_pose_index < len(
+                            self.current_poses
+                        ):
+                            self._send_next_pose_pair()
+                        else:
+                            print("All poses sent or no poses loaded.")
+                    elif msg in self.points:
+                        print(f"Sending response: {self.points[msg]}")
+                        self.client_conn.sendall(
+                            (self.points[msg] + "\n").encode("ascii")
+                        )
+                        if self.on_message_sent:
+                            self.on_message_sent(self.points[msg])
                     else:
-                        # Unknown message, send next pose if available
-                        self._send_next_pose()
+                        print(f"Unknown message: {msg}")
 
         except Exception as e:
             print(f"Client handling error: {e}")
 
-    def _send_next_pose(self):
-        """Send the next pose in the sequence"""
+    def _send_next_pose_pair(self):
+        """Send the next pose pair (pickup and target) for the current piece"""
         if self.current_pose_index < len(self.current_poses):
             pose = self.current_poses[self.current_pose_index]
-            # Convert rotation from degrees to radians and invert direction
-            rotation_rad = math.radians(-pose["rotation"])
-            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, 0, {rotation_rad:.6f}, 0)"
+            # Create single pose string: (pickup_x, 0, pickup_y, 0, inverted_rotation_rad, 0)
+            inverted_rotation_rad = math.radians(-pose["rotation"])
+            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, {pose['target_x']:.6f}, {pose['target_y']:.6f}, {inverted_rotation_rad:.6f})\n"
 
             try:
                 self.client_conn.sendall((pose_str + "\n").encode("ascii"))
@@ -122,11 +133,6 @@ class PoseSender:
                     self.on_pose_sent(self.current_pose_index)
 
                 self.current_pose_index += 1
-
-                # Check if all poses sent
-                if self.current_pose_index >= len(self.current_poses):
-                    if self.on_all_poses_sent:
-                        self.on_all_poses_sent()
 
             except Exception as e:
                 print(f"Error sending pose: {e}")
@@ -151,6 +157,10 @@ class PoseSender:
             print(f"Error loading poses: {e}")
             return False
 
+    def set_points(self, points_dict):
+        """Set predefined points dictionary"""
+        self.points = points_dict
+
     def start_sending_poses(self):
         """Start sending poses to robot"""
         if not self.client_conn:
@@ -158,7 +168,7 @@ class PoseSender:
             return False
 
         self.current_pose_index = 0
-        self._send_next_pose()
+        self._send_next_pose_pair()
         return True
 
 
@@ -179,6 +189,11 @@ def stop_pose_server():
 def load_poses(json_file, num_pieces=None):
     """Load poses from JSON file"""
     return pose_sender.load_poses_from_json(json_file, num_pieces)
+
+
+def set_points(points_dict):
+    """Set predefined points dictionary"""
+    pose_sender.set_points(points_dict)
 
 
 def send_poses():

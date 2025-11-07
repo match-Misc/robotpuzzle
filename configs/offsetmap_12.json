@@ -1,0 +1,13 @@
+{
+  "grid_size": {
+    "columns": 4,
+    "rows": 3
+  },
+  "origin": "bottom-left",
+  "offset": 10,
+  "map": [
+    [12, 5, 4, 11],
+    [2, 7, 3, 6],
+    [8, 1, 9, 10]
+  ]
+}

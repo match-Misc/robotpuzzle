@@ -303,14 +303,14 @@ class GameManagerGUI:
     def on_difficulty_select(self):
         """Handle difficulty selection"""
         self.difficulty = self.difficulty_var.get()
-        if self.nfc_id and self.player_name and self.difficulty:
+        if self.difficulty:
             self.start_game_btn.configure(state="normal")
         else:
             self.start_game_btn.configure(state="disabled")
 
     def start_game(self):
         """Start the game"""
-        if not all([self.nfc_id, self.player_name, self.difficulty]):
+        if not self.difficulty:
             return
 
         # Determine number of pieces based on difficulty
@@ -448,10 +448,17 @@ class GameManagerGUI:
         self.winner_btn.configure(state="disabled")
         self.loser_btn.configure(state="disabled")
 
-        # Submit result
-        threading.Thread(
-            target=self._submit_result_thread, args=(is_winner,), daemon=True
-        ).start()
+        # Submit result only if nfc_id and player_name are set
+        if self.nfc_id and self.player_name:
+            threading.Thread(
+                target=self._submit_result_thread, args=(is_winner,), daemon=True
+            ).start()
+        else:
+            # Skip submission, just reset
+            self.game_status_label.configure(
+                text="Game completed (no submission)", text_color="blue"
+            )
+            self.reset_game()
 
     def _submit_result_thread(self, is_winner):
         """Submit result thread"""
@@ -516,7 +523,7 @@ class GameManagerGUI:
         self.game_status_label.configure(
             text="Waiting for player setup", text_color="gray"
         )
-        self.progress_label.configure(text="Pieces placed: 0/0")
+        self.progress_label.configure(text="Pieces sent: 0/0")
         self.start_game_btn.configure(state="disabled")
         self.stop_game_btn.configure(state="disabled")
         self.winner_btn.configure(state="disabled")
