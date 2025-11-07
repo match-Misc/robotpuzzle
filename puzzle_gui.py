@@ -83,10 +83,6 @@ def get_robust_orientation(contour, image_shape):
     angle_rad = np.arctan2(main_axis[1], main_axis[0])
     angle_deg = np.degrees(angle_rad)
 
-    # Ensure angle is in [0, 180) range
-    # if angle_deg < 0:
-    #     angle_deg += 180
-
     return angle_deg
 
 
@@ -131,7 +127,6 @@ class PuzzleSolverGUI:
         # Webcam variables
         self.cap = None
         self.is_capturing = False
-        self.current_frame = None
 
         # Live mode variables
         self.is_live_mode = False
@@ -882,9 +877,6 @@ class PuzzleSolverGUI:
         tx = target_x_px - pickup_x_px
         ty = target_y_px - pickup_y_px
 
-        # Rotation angle (use target orientation if specified, otherwise keep detected)
-        # angle = target_angle if use_target_orientation else pickup_angle
-
         angle = target_angle - pickup_angle
 
         # Scaling factor (only if apply_scaling is True)
@@ -1010,7 +1002,6 @@ class PuzzleSolverGUI:
             ) = detected_pieces[detected_idx]
             target = target_pieces[target_idx]
 
-            target["centroid"]
             best_target_angle = target["orientation"]
             best_match = target["id"]
             target_pose = target["target_pose"]
@@ -1119,7 +1110,6 @@ class PuzzleSolverGUI:
                 corrected_pickup_pose,
             )
 
-            # # Compute transformation in mm and degrees
             translation_mm = (
                 target_pose[0] - corrected_pickup_pose[0],
                 target_pose[1] - corrected_pickup_pose[1],
