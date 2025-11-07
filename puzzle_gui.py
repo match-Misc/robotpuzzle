@@ -4,6 +4,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 
 import customtkinter as ctk
 import cv2
@@ -304,6 +305,63 @@ class PuzzleSolverGUI:
         )
         self.captured_canvas.pack(fill="both", expand=True, padx=10, pady=(0, 5))
 
+        # Third row - Mask visualizations
+        third_row = ctk.CTkFrame(left_panel)
+        third_row.pack(fill="both", expand=True, pady=(0, 10))
+
+        mask_label = ctk.CTkLabel(
+            third_row,
+            text="Mask Visualizations",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        )
+        mask_label.pack(pady=(5, 5))
+
+        # Target mask section
+        target_frame = ctk.CTkFrame(third_row)
+        target_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        target_label = ctk.CTkLabel(
+            target_frame, text="Target Mask", font=ctk.CTkFont(size=12, weight="bold")
+        )
+        target_label.pack(pady=(5, 5))
+
+        self.target_mask_canvas = ctk.CTkCanvas(
+            target_frame, bg="gray20", highlightthickness=0
+        )
+        self.target_mask_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # Detected mask section
+        detected_frame = ctk.CTkFrame(third_row)
+        detected_frame.pack(side="left", fill="both", expand=True, padx=(0, 5))
+
+        detected_label = ctk.CTkLabel(
+            detected_frame,
+            text="Mask with PCA Rotation",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        detected_label.pack(pady=(5, 5))
+
+        self.detected_mask_canvas = ctk.CTkCanvas(
+            detected_frame, bg="gray20", highlightthickness=0
+        )
+        self.detected_mask_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
+        # Rotated detected mask section
+        rotated_frame = ctk.CTkFrame(third_row)
+        rotated_frame.pack(side="left", fill="both", expand=True, padx=(0, 0))
+
+        rotated_label = ctk.CTkLabel(
+            rotated_frame,
+            text="Mask with PCA Rotation + 180°",
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        rotated_label.pack(pady=(5, 5))
+
+        self.rotated_mask_canvas = ctk.CTkCanvas(
+            rotated_frame, bg="gray20", highlightthickness=0
+        )
+        self.rotated_mask_canvas.pack(fill="both", expand=True, padx=5, pady=(0, 5))
+
         # Right panel - Solution image
         right_panel = ctk.CTkFrame(display_frame)
         right_panel.pack(side="right", fill="both", expand=True, padx=(5, 0))
@@ -430,7 +488,7 @@ class PuzzleSolverGUI:
             if self.detected_pieces and self.solution_map and self.piece_colors:
                 for i, (cnt, _, _, _, pickup_pose) in enumerate(self.detected_pieces):
                     if i < len(self.solution_map):
-                        _, target_pose, _, _, _, _ = self.solution_map[i]
+                        _, target_pose, _, _, _, _, _, _, _, _ = self.solution_map[i]
                         # Transform contour to target space with detected orientation (no scaling for initial display)
                         transformed_cnt = self.transform_contour(
                             cnt,
@@ -543,7 +601,9 @@ class PuzzleSolverGUI:
 
     def process_puzzle(self, num_pieces):
         try:
+            print("Starting puzzle processing...")
             # Load calibration
+            print("Loading calibration...")
             config = self.load_config()
             if config is None:
                 self.root.after(
@@ -556,27 +616,39 @@ class PuzzleSolverGUI:
 
             M = np.array(config["M"])
             output_size = tuple(config["output_size"])
+            print(f"Calibration loaded: M shape {M.shape}, output_size {output_size}")
 
             # Apply perspective transform
+            print("Applying perspective transform...")
             transformed = cv2.warpPerspective(self.captured_image, M, output_size)
             self.warped_image = transformed
+            print(f"Warped image shape: {transformed.shape}")
 
             # Stretch to 16:10
+            print("Stretching to 16:10 aspect ratio...")
             stretched = self.stretch_to_16_10(transformed)
             self.stretched_image = stretched
+            print(f"Stretched image shape: {stretched.shape}")
 
             # Detect pieces
+            print(f"Detecting {num_pieces} pieces...")
             self.detected_pieces = self.detect_pieces(stretched, num_pieces)
+            print(f"Detected {len(self.detected_pieces)} pieces")
 
             # Load target pieces
+            print("Loading target pieces...")
             self.target_pieces = self.load_target_pieces(num_pieces)
+            print(f"Loaded {len(self.target_pieces)} target pieces")
 
             # Match pieces
+            print("Matching pieces...")
             self.solution_map = self.match_pieces(
                 self.detected_pieces, self.target_pieces
             )
+            print(f"Matched {len(self.solution_map)} pieces")
 
             # Update GUI
+            print("Updating display...")
             self.root.after(0, self.update_display)
 
             self.root.after(
@@ -585,9 +657,12 @@ class PuzzleSolverGUI:
                     text="Processing complete", text_color="green"
                 ),
             )
+            print("Processing complete.")
 
         except Exception as e:
             error_msg = str(e)
+            print("Processing failed:")
+            traceback.print_exc()
             self.root.after(
                 0,
                 lambda: self.status_label.configure(
@@ -818,32 +893,84 @@ class PuzzleSolverGUI:
             target_mask_path = f"configs/piece_{best_match}_mask.png"
             target_mask = cv2.imread(target_mask_path, cv2.IMREAD_GRAYSCALE)
 
-            # Create detected mask: draw on full image, then crop to bounding box
+            # Calculate rotation to align detected piece with target orientation
+            detected_angle_norm = detected_angle % 180
+            best_target_angle_norm = best_target_angle % 180
+            rotation_deg = -(
+                best_target_angle_norm - detected_angle_norm
+            )  # Invert sign for counter-clockwise positive
+
+            # Rotate the contour first before creating the mask
+            M_cnt = cv2.moments(detected_cnt)
+            if M_cnt["m00"] != 0:
+                cx_cnt = int(M_cnt["m10"] / M_cnt["m00"])
+                cy_cnt = int(M_cnt["m01"] / M_cnt["m00"])
+            else:
+                cx_cnt, cy_cnt = 0, 0
+            rotation_matrix_cnt = cv2.getRotationMatrix2D(
+                (cx_cnt, cy_cnt), rotation_deg, 1.0
+            )
+            rotated_cnt = cv2.transform(
+                detected_cnt.reshape(-1, 1, 2).astype(np.float32), rotation_matrix_cnt
+            ).astype(np.int32)
+
+            # Create detected mask from rotated contour: draw on full image, then crop to bounding box
             detected_mask_full = np.zeros(
                 (self.stretched_image.shape[0], self.stretched_image.shape[1]),
                 dtype=np.uint8,
             )
-            cv2.drawContours(detected_mask_full, [detected_cnt], -1, 255, -1)
-            x, y, w, h = cv2.boundingRect(detected_cnt)
+            cv2.drawContours(detected_mask_full, [rotated_cnt], -1, 255, -1)
+            x, y, w, h = cv2.boundingRect(rotated_cnt)
             detected_cropped = detected_mask_full[y : y + h, x : x + w]
 
-            # Resize both masks to 200x200 for comparison
-            target_resized = cv2.resize(
-                target_mask, (200, 200), interpolation=cv2.INTER_NEAREST
-            )
-            detected_resized = cv2.resize(
-                detected_cropped, (200, 200), interpolation=cv2.INTER_NEAREST
-            )
+            # Check if cropped image is empty
+            if detected_cropped.size == 0 or w == 0 or h == 0:
+                print(
+                    f"Warning: Empty detected mask for piece {best_match}, skipping IoU computation"
+                )
+                max_iou = 0.0
+                detected_resized = np.zeros((200, 200), dtype=np.uint8)
+                detected_flipped_resized = np.zeros((200, 200), dtype=np.uint8)
+            else:
+                # Resize both masks to 200x200 for comparison
+                target_resized = cv2.resize(
+                    target_mask, (200, 200), interpolation=cv2.INTER_NEAREST
+                )
+                detected_resized = cv2.resize(
+                    detected_cropped, (200, 200), interpolation=cv2.INTER_NEAREST
+                )
 
-            # Compute IoU for normal orientation
-            iou_normal = compute_iou(detected_resized, target_resized)
+                # Compute IoU for normal orientation
+                iou_normal = compute_iou(detected_resized, target_resized)
 
-            # Compute IoU for 180° flipped orientation
-            detected_cropped_flipped = cv2.rotate(detected_cropped, cv2.ROTATE_180)
-            detected_flipped_resized = cv2.resize(
-                detected_cropped_flipped, (200, 200), interpolation=cv2.INTER_NEAREST
-            )
-            iou_flipped = compute_iou(detected_flipped_resized, target_resized)
+                # Compute IoU for 180° flipped orientation
+                detected_cropped_flipped = cv2.rotate(detected_cropped, cv2.ROTATE_180)
+                detected_flipped_resized = cv2.resize(
+                    detected_cropped_flipped,
+                    (200, 200),
+                    interpolation=cv2.INTER_NEAREST,
+                )
+                iou_flipped = compute_iou(detected_flipped_resized, target_resized)
+
+                # Choose the orientation with higher IoU (only if not empty)
+                if detected_cropped.size > 0 and w > 0 and h > 0:
+                    if iou_flipped > iou_normal:
+                        max_iou = iou_flipped
+                        corrected_angle = (detected_angle + 180) % 360
+                        corrected_pickup_pose = (
+                            pickup_pose[0],
+                            pickup_pose[1],
+                            pickup_pose[2],
+                            corrected_angle,
+                        )
+                    else:
+                        max_iou = iou_normal
+                        corrected_angle = detected_angle
+                        corrected_pickup_pose = pickup_pose
+                else:
+                    max_iou = 0.0
+                    corrected_angle = detected_angle
+                    corrected_pickup_pose = pickup_pose
 
             # Choose the orientation with higher IoU
             if iou_flipped > iou_normal:
@@ -888,7 +1015,11 @@ class PuzzleSolverGUI:
                     translation_mm,
                     rotation_deg,
                     best_match,
-                    max_iou,
+                    iou_normal,
+                    iou_flipped,
+                    target_resized,
+                    detected_resized,
+                    detected_flipped_resized,
                 )
             )
 
@@ -1041,6 +1172,59 @@ class PuzzleSolverGUI:
                     x, y, anchor="nw", image=self.captured_photo
                 )
 
+    def display_masks(self, piece_index):
+        if piece_index >= len(self.solution_map):
+            return
+
+        _, _, _, _, _, _, _, target_mask, detected_mask, rotated_mask = (
+            self.solution_map[piece_index]
+        )
+
+        # Display target mask
+        self.display_mask_on_canvas(target_mask, self.target_mask_canvas)
+
+        # Display detected mask
+        self.display_mask_on_canvas(detected_mask, self.detected_mask_canvas)
+
+        # Display rotated mask
+        self.display_mask_on_canvas(rotated_mask, self.rotated_mask_canvas)
+
+    def display_mask_on_canvas(self, mask, canvas):
+        if mask is None:
+            canvas.delete("all")
+            return
+
+        # mask is 200x200 grayscale
+        # Convert to RGB
+        rgb = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
+
+        # Resize to fit canvas
+        canvas_width = canvas.winfo_width()
+        canvas_height = canvas.winfo_height()
+
+        if canvas_width > 1 and canvas_height > 1:
+            img_height, img_width = rgb.shape[:2]
+            scale = min(canvas_width / img_width, canvas_height / img_height)
+            new_width = int(img_width * scale)
+            new_height = int(img_height * scale)
+
+            resized = cv2.resize(rgb, (new_width, new_height))
+            img = Image.fromarray(resized)
+            photo = ImageTk.PhotoImage(img)
+
+            # Set as attribute to prevent garbage collection
+            setattr(self, f"{id(canvas)}_photo", photo)
+
+            x = (canvas_width - new_width) // 2
+            y = (canvas_height - new_height) // 2
+
+            canvas.create_image(x, y, anchor="nw", image=photo)
+
+    def clear_masks(self):
+        self.target_mask_canvas.delete("all")
+        self.detected_mask_canvas.delete("all")
+        self.rotated_mask_canvas.delete("all")
+
     def on_mouse_move(self, event):
         if (
             not self.detected_pieces
@@ -1077,6 +1261,7 @@ class PuzzleSolverGUI:
                     self.hovered_piece = i
                     self.highlight_solution_piece(i)
                     self.update_info_text(i)
+                    self.display_masks(i)
                 return
 
         # Mouse not over any piece
@@ -1090,14 +1275,15 @@ class PuzzleSolverGUI:
             self.hovered_piece = None
             self.display_solution_image()
             self.info_label.configure(text="Hover over pieces to see target positions")
+            self.clear_masks()
 
     def highlight_solution_piece(self, piece_index):
         if piece_index >= len(self.solution_map) or not self.piece_colors:
             return
 
-        pickup_pose, target_pose, _, _, piece_id, max_iou = self.solution_map[
-            piece_index
-        ]
+        pickup_pose, target_pose, _, _, piece_id, iou_normal, iou_flipped, _, _, _ = (
+            self.solution_map[piece_index]
+        )
         cnt, _, _, _, _ = self.detected_pieces[piece_index]
 
         if self.solution_image is not None:
@@ -1108,7 +1294,7 @@ class PuzzleSolverGUI:
                 self.detected_pieces
             ):
                 if i < len(self.solution_map):
-                    _, other_target_pose, _, _, _, _ = self.solution_map[i]
+                    _, other_target_pose, _, _, _, _, _, _, _, _ = self.solution_map[i]
                     # For the hovered piece, use target orientation and apply scaling; for others, use detected orientation without scaling
                     use_target = i == piece_index
                     apply_scaling = i == piece_index
@@ -1179,14 +1365,23 @@ class PuzzleSolverGUI:
         if piece_index >= len(self.solution_map):
             return
 
-        pickup_pose, target_pose, translation_mm, rotation_deg, piece_id, max_iou = (
-            self.solution_map[piece_index]
-        )
+        (
+            pickup_pose,
+            target_pose,
+            translation_mm,
+            rotation_deg,
+            piece_id,
+            iou_normal,
+            iou_flipped,
+            _,
+            _,
+            _,
+        ) = self.solution_map[piece_index]
 
         info_text = (
             f"Piece {piece_id}: Pickup ({pickup_pose[0]:.1f}, {pickup_pose[1]:.1f}, {pickup_pose[2]:.1f}, {pickup_pose[3]:.1f}°) -> "
             f"Target ({target_pose[0]:.1f}, {target_pose[1]:.1f}, {target_pose[2]:.1f}, {target_pose[3]:.1f}°) | "
-            f"Translate ({translation_mm[0]:.1f}, {translation_mm[1]:.1f}) mm | Rotate {rotation_deg:.1f}° | IoU: {max_iou:.3f}"
+            f"Translate ({translation_mm[0]:.1f}, {translation_mm[1]:.1f}) mm | Rotate {rotation_deg:.1f}° | IoU Normal: {iou_normal:.3f}, IoU Flipped: {iou_flipped:.3f}"
         )
 
         self.info_label.configure(text=info_text)
@@ -1197,6 +1392,7 @@ class PuzzleSolverGUI:
         # Reapply highlight if hovering
         if self.hovered_piece is not None:
             self.highlight_solution_piece(self.hovered_piece)
+            self.display_masks(self.hovered_piece)
 
     def toggle_live_mode(self):
         if self.is_live_mode:
@@ -1311,6 +1507,8 @@ class PuzzleSolverGUI:
 
         except Exception as e:
             error_msg = str(e)
+            print("Live mode error:")
+            traceback.print_exc()
             self.root.after(
                 0,
                 lambda: self.status_label.configure(

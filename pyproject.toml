@@ -10,6 +10,7 @@ dependencies = [
     "customtkinter",
     "Pillow",
     "scipy",
+    "pyserial>=3.5",
 ]
 
 [tool.hatch.build.targets.wheel]
