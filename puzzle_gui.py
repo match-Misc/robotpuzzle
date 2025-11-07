@@ -647,6 +647,37 @@ class PuzzleSolverGUI:
             )
             print(f"Matched {len(self.solution_map)} pieces")
 
+            # Create solved puzzle JSON
+            print("Creating solved puzzle JSON...")
+            solved_puzzle_data = []
+            for (
+                pickup_pose,
+                target_pose,
+                _,
+                rotation_deg,
+                piece_id,
+                _,
+                _,
+                _,
+                _,
+                _,
+            ) in self.solution_map:
+                piece_data = {
+                    "id": piece_id,
+                    "pickup_x": pickup_pose[0],
+                    "pickup_y": pickup_pose[1],
+                    "target_x": target_pose[0],
+                    "target_y": target_pose[1],
+                    "rotation": rotation_deg,
+                }
+                solved_puzzle_data.append(piece_data)
+
+            # Save to JSON file
+            solved_json_path = f"solved_puzzle_{num_pieces}.json"
+            with open(solved_json_path, "w") as f:
+                json.dump(solved_puzzle_data, f, indent=2)
+            print(f"Saved solved puzzle data to {solved_json_path}")
+
             # Update GUI
             print("Updating display...")
             self.root.after(0, self.update_display)
