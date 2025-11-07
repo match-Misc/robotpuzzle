@@ -337,7 +337,7 @@ class GameManagerGUI:
     def start_countdown(self):
         """Start countdown from 10"""
         self.countdown_active = True
-        self.countdown_value = 10
+        self.countdown_value = 3
         self.timer_label.configure(text_color="orange")
         self.game_status_label.configure(text="Get ready!", text_color="orange")
         self.start_game_btn.configure(state="disabled")

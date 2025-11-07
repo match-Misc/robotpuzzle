@@ -125,9 +125,9 @@ class PoseSender:
             pickup_y = pose.get("pickup_y", 0)
             target_x = pose.get("target_x", 0) + pose.get("offset_x", 0)
             target_y = pose.get("target_y", 0) + pose.get("offset_y", 0)
-            # Create single string with pickup and target coordinates and inverted rotation
-            inverted_rotation_rad = math.radians(-pose["rotation"])
-            pose_str = f"({pickup_x:.6f}, {pickup_y:.6f}, 0.0, {target_x:.6f}, {target_y:.6f}, {inverted_rotation_rad:.6f})"
+            # Create single string with pickup and target coordinates
+            rotation_rad = math.radians(pose["rotation"])
+            pose_str = f"({pickup_x:.6f}, {pickup_y:.6f}, 0.0, {target_x:.6f}, {target_y:.6f}, {rotation_rad:.6f})"
 
             try:
                 self.client_conn.sendall((pose_str + "\n").encode("ascii"))
