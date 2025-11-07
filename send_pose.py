@@ -37,12 +37,12 @@ class PoseSender:
         if self.client_conn:
             try:
                 self.client_conn.close()
-            except:
+            except Exception:
                 pass
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except:
+            except Exception:
                 pass
 
     def _run_server(self):

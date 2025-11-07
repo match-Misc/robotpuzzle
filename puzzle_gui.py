@@ -1060,7 +1060,6 @@ class PuzzleSolverGUI:
                 print(
                     f"Warning: Empty detected mask for piece {best_match}, skipping IoU computation"
                 )
-                max_iou = 0.0
                 detected_resized = np.zeros((200, 200), dtype=np.uint8)
                 detected_flipped_resized = np.zeros((200, 200), dtype=np.uint8)
             else:
@@ -1086,7 +1085,6 @@ class PuzzleSolverGUI:
 
                 # Choose the orientation with higher IoU
                 if iou_flipped > iou_normal:
-                    max_iou = iou_flipped
                     corrected_angle = (detected_angle + 180) % 360
                     corrected_pickup_pose = (
                         pickup_pose[0],
@@ -1109,7 +1107,6 @@ class PuzzleSolverGUI:
                         rotation_matrix_flip,
                     ).astype(np.int32)
                 else:
-                    max_iou = iou_normal
                     corrected_angle = detected_angle
                     corrected_pickup_pose = pickup_pose
 
@@ -1122,7 +1119,7 @@ class PuzzleSolverGUI:
                 corrected_pickup_pose,
             )
 
-            # Compute transformation in mm and degrees
+            # # Compute transformation in mm and degrees
             translation_mm = (
                 target_pose[0] - corrected_pickup_pose[0],
                 target_pose[1] - corrected_pickup_pose[1],
@@ -1456,15 +1453,6 @@ class PuzzleSolverGUI:
                         5,
                         tipLength=0.1,
                     )
-
-            # Convert target pose back to pixels for additional highlighting
-            target_x_px = int(
-                (target_pose[0] / TARGET_FRAME_WIDTH_MM) * TARGET_FRAME_RESOLUTION[0]
-            )
-            target_y_px = int(
-                TARGET_FRAME_RESOLUTION[1]
-                - (target_pose[1] / TARGET_FRAME_HEIGHT_MM) * TARGET_FRAME_RESOLUTION[1]
-            )
 
             # Update solution canvas
             canvas_width = self.solution_canvas.winfo_width()

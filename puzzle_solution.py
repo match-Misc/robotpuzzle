@@ -259,7 +259,7 @@ else:
         )
 
     # --- 9. Save Detected Pieces Image ---
-    image_filename = f"configs/detected_pieces.png"
+    image_filename = "configs/detected_pieces.png"
     cv2.imwrite(image_filename, output_image)
     print(f"Detected pieces image saved to '{image_filename}'.")
 
