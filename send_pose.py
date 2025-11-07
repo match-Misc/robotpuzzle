@@ -14,11 +14,13 @@ class PoseSender:
         self.client_conn = None
         self.client_addr = None
         self.is_running = False
+        self.ready = False  # flag to indicate robot sent "ok"
         self.current_poses = []
         self.points = {}
         self.on_pose_sent = None  # callback when pose is sent
         self.on_message_received = None  # callback when message received from robot
         self.on_message_sent = None  # callback when message sent to robot
+        self.on_robot_ready = None  # callback when robot sends "ok"
 
     def start_server(self):
         """Start the pose server in a separate thread"""
@@ -86,7 +88,12 @@ class PoseSender:
                     if self.on_message_received:
                         self.on_message_received(msg)
 
-                    if msg == "placed":
+                    if msg == "ok":
+                        self.ready = True
+                        print("Robot is ready")
+                        if self.on_robot_ready:
+                            self.on_robot_ready()
+                    elif msg == "placed":
                         # Short timeout before sending next pose
                         time.sleep(0.5)
                         # Send next pose pair after receiving "placed"
@@ -113,9 +120,14 @@ class PoseSender:
         """Send the next pose pair (pickup and target) for the current piece"""
         if self.current_pose_index < len(self.current_poses):
             pose = self.current_poses[self.current_pose_index]
-            # Create single pose string: (pickup_x, 0, pickup_y, 0, inverted_rotation_rad, 0)
+            # Apply offsets to target coordinates if available, to avoid collisions
+            pickup_x = pose.get("pickup_x", 0)
+            pickup_y = pose.get("pickup_y", 0)
+            target_x = pose.get("target_x", 0) + pose.get("offset_x", 0)
+            target_y = pose.get("target_y", 0) + pose.get("offset_y", 0)
+            # Create single string with pickup and target coordinates and inverted rotation
             inverted_rotation_rad = math.radians(-pose["rotation"])
-            pose_str = f"({pose['pickup_x']:.6f}, {pose['pickup_y']:.6f}, 0.0, {pose['target_x']:.6f}, {pose['target_y']:.6f}, {inverted_rotation_rad:.6f})"
+            pose_str = f"({pickup_x:.6f}, {pickup_y:.6f}, 0.0, {target_x:.6f}, {target_y:.6f}, {inverted_rotation_rad:.6f})"
 
             try:
                 self.client_conn.sendall((pose_str + "\n").encode("ascii"))
@@ -163,6 +175,10 @@ class PoseSender:
         """Start sending poses to robot"""
         if not self.client_conn:
             print("No robot connected")
+            return False
+
+        if not self.ready:
+            print("Robot not ready yet")
             return False
 
         self.current_pose_index = 0

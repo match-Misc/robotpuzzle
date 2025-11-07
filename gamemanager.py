@@ -45,6 +45,7 @@ class GameManagerGUI:
         pose_sender.on_all_poses_sent = self.on_all_poses_sent
         pose_sender.on_message_received = self.on_message_received
         pose_sender.on_message_sent = self.on_message_sent
+        pose_sender.on_robot_ready = self.on_robot_ready
 
     def create_widgets(self):
         # Main container
@@ -421,6 +422,11 @@ class GameManagerGUI:
     def on_message_received(self, message):
         """Callback when message received from robot"""
         print(f"Received from robot: {message}")
+
+    def on_robot_ready(self):
+        """Callback when robot sends 'ok'"""
+        print("Robot is ready for game")
+        # Could update UI here if needed
 
     def on_message_sent(self, message):
         """Callback when message sent to robot"""
