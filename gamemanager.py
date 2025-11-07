@@ -321,7 +321,7 @@ class GameManagerGUI:
             num_pieces = 24
 
         # Load poses
-        json_file = "solved_puzzle_24_with_offsets.json"
+        json_file = f"solved_puzzle_{num_pieces}_with_offsets.json"
         if load_poses(json_file, num_pieces):
             self.total_poses = num_pieces
             self.poses_sent = 0

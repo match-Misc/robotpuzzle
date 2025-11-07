@@ -764,14 +764,15 @@ class PuzzleSolverGUI:
 
     def compute_offsets(self, piece_id, offsetmap):
         """
-        Compute x and y offsets for a piece based on its position in the grid relative to the origin.
-        The origin piece (piece 22 in the example) has offset (0, 0).
+        Compute x and y offsets for a piece based on its grid position.
+
+        This function assumes the 'offsetmap' uses a "bottom-left" origin,
+        where grid_map[0][0] is the piece at offset (0, 0).
         """
         grid_map = offsetmap["map"]
-        origin = offsetmap["origin"]
         offset_value = offsetmap["offset"]
 
-        # Find the position of the piece in the grid
+        # Find the grid coordinates (row, col) of the piece
         rows = len(grid_map)
         cols = len(grid_map[0]) if rows > 0 else 0
 
@@ -788,28 +789,17 @@ class PuzzleSolverGUI:
             print(f"Warning: Piece {piece_id} not found in offsetmap")
             return 0.0, 0.0
 
-        # Find the origin position (piece 24)
-        origin_position = None
-        for r in range(rows):
-            for c in range(cols):
-                if grid_map[r][c] == 24:  # Origin is piece 24
-                    origin_position = (r, c)
-                    break
-            if origin_position:
-                break
+        # With a "bottom-left" origin map (map[0][0]), the grid indices
+        # (r, c) directly correspond to the offset multipliers.
+        # piece_position[0] is the row index (y-offset)
+        # piece_position[1] is the column index (x-offset)
 
-        if not origin_position:
-            print("Warning: Origin piece (22) not found in offsetmap")
-            return 0.0, 0.0
-
-        # Calculate relative position
-        rel_row = piece_position[0] - origin_position[0]
-        rel_col = piece_position[1] - origin_position[1]
+        rel_row = piece_position[0]
+        rel_col = piece_position[1]
 
         # Compute offsets: x increases to the right, y increases upwards
-        # Assuming origin is bottom-left, so positive x is right, positive y is up
-        offset_x = rel_col * offset_value
-        offset_y = rel_row * offset_value
+        offset_x = float(rel_col * offset_value)
+        offset_y = float(rel_row * offset_value)
 
         return offset_x, offset_y
 
