@@ -95,6 +95,7 @@ def compute_iou(mask1, mask2):
     if union == 0:
         return 0.0
     return intersection / union
+    # return 0.0
 
 
 # Set appearance mode and color theme
@@ -688,9 +689,10 @@ class PuzzleSolverGUI:
                     "id": piece_id,
                     "pickup_x": pickup_pose[0],
                     "pickup_y": pickup_pose[1],
+                    "pickup_angle": pickup_pose[3],
                     "target_x": target_pose[0],
                     "target_y": target_pose[1],
-                    "rotation": rotation_deg,
+                    "target_angle": target_pose[3],
                 }
                 solved_puzzle_data.append(piece_data)
 
@@ -981,7 +983,7 @@ class PuzzleSolverGUI:
     def match_pieces(self, detected_pieces, target_pieces, num_pieces):
         import scipy.optimize
 
-        # Create cost matrix
+        # Create cost matrix (Hu moments)
         cost_matrix = np.zeros((len(detected_pieces), len(target_pieces)))
         for i, (_, detected_hu, _, _, _) in enumerate(detected_pieces):
             for j, target in enumerate(target_pieces):
@@ -992,151 +994,183 @@ class PuzzleSolverGUI:
         row_ind, col_ind = scipy.optimize.linear_sum_assignment(cost_matrix)
 
         solution_map = []
+
+        # --- Helper function for new IoU logic ---
+        def get_final_iou(
+            detected_cnt, pickup_pose, target_pose, target_id, target_mask
+        ):
+            """
+            Transforms the detected contour to its final solution space,
+            creates a mask, crops it, resizes it, and compares it to
+            the resized target (solution) mask.
+
+            This single function performs the logic you requested:
+            "compare the final prediction of the transformed detected mask,
+            with the solution mask"
+            """
+
+            # 1. Transform contour to FINAL solution space
+            #    This applies translation, rotation, AND scaling.
+            final_transformed_cnt = self.transform_contour(
+                detected_cnt,
+                pickup_pose,
+                target_pose,
+                use_target_orientation=True,  # Use target orientation
+                apply_scaling=True,  # Apply scaling
+                target_piece_id=target_id,
+            )
+
+            # 2. Create mask from this final contour on a full-size solution canvas
+            final_mask_shape = (
+                TARGET_FRAME_RESOLUTION[1],
+                TARGET_FRAME_RESOLUTION[0],
+            )  # (rows, cols)
+            final_mask_full = np.zeros(final_mask_shape, dtype=np.uint8)
+            cv2.drawContours(final_mask_full, [final_transformed_cnt], -1, 255, -1)
+
+            # 3. Crop the final mask to its content
+            x, y, w, h = cv2.boundingRect(final_transformed_cnt)
+
+            # Clamp bounding rect to image boundaries
+            img_h, img_w = final_mask_full.shape
+            x = max(0, x)
+            y = max(0, y)
+            w = min(w, img_w - x)
+            h = min(h, img_h - y)
+
+            final_mask_cropped = final_mask_full[y : y + h, x : x + w]
+
+            if final_mask_cropped.size == 0 or w == 0 or h == 0:
+                # Failed to create a valid mask (e.g., out of bounds)
+                return 0.0, np.zeros((200, 200), dtype=np.uint8)
+
+            # 4. Resize both cropped masks to a standard size for comparison
+            #    (This compares the final transformed shape with the solution shape)
+            comparison_size = (200, 200)
+
+            # Resize target mask (which is already cropped)
+            target_mask_resized = cv2.resize(
+                target_mask, comparison_size, interpolation=cv2.INTER_NEAREST
+            )
+
+            # Resize final predicted mask (which we just cropped)
+            final_mask_resized = cv2.resize(
+                final_mask_cropped, comparison_size, interpolation=cv2.INTER_NEAREST
+            )
+
+            # 5. Compute IoU
+            iou = compute_iou(final_mask_resized, target_mask_resized)
+
+            return iou, final_mask_resized  # Return IoU and the mask used for it
+
+        # --- End of helper function ---
+
         for detected_idx, target_idx in zip(row_ind, col_ind):
             (
                 detected_cnt,
                 detected_hu,
                 detected_centroid,
                 detected_angle,
-                pickup_pose,
+                pickup_pose,  # This is the initial pickup_pose with the initial detected_angle
             ) = detected_pieces[detected_idx]
-            target = target_pieces[target_idx]
 
+            target = target_pieces[target_idx]
+            target_pose = target["target_pose"]
             best_target_angle = target["orientation"]
             best_match = target["id"]
-            target_pose = target["target_pose"]
 
-            # Load target mask for IoU computation (already cropped)
+            # Load the (cropped) solution mask
             target_mask_path = f"configs/piece_{num_pieces}_{best_match}_mask.png"
             target_mask = cv2.imread(target_mask_path, cv2.IMREAD_GRAYSCALE)
 
-            # Calculate rotation to align detected piece with target orientation
-            detected_angle_norm = detected_angle % 180
-            best_target_angle_norm = best_target_angle % 180
-            rotation_deg = -(
-                best_target_angle_norm - detected_angle_norm
-            )  # Invert sign for counter-clockwise positive
+            if target_mask is None:
+                print(f"Warning: Could not load target mask {target_mask_path}")
+                # Create a dummy mask to avoid crashing
+                target_mask = np.zeros((200, 200), dtype=np.uint8)
 
-            # Rotate the contour first before creating the mask
-            M_cnt = cv2.moments(detected_cnt)
-            if M_cnt["m00"] != 0:
-                cx_cnt = int(M_cnt["m10"] / M_cnt["m00"])
-                cy_cnt = int(M_cnt["m01"] / M_cnt["m00"])
-            else:
-                cx_cnt, cy_cnt = 0, 0
-            rotation_matrix_cnt = cv2.getRotationMatrix2D(
-                (cx_cnt, cy_cnt), rotation_deg, 1.0
+            # --- Test Hypothesis 1: Normal Orientation (0-degree flip) ---
+            # The pickup_pose from detected_pieces already has the normal angle
+            iou_normal, detected_resized = get_final_iou(
+                detected_cnt, pickup_pose, target_pose, best_match, target_mask
             )
-            rotated_cnt = cv2.transform(
-                detected_cnt.reshape(-1, 1, 2).astype(np.float32), rotation_matrix_cnt
-            ).astype(np.int32)
 
-            # Create detected mask from rotated contour: draw on full image, then crop to bounding box
-            detected_mask_full = np.zeros(
-                (self.stretched_image.shape[0], self.stretched_image.shape[1]),
-                dtype=np.uint8,
+            # --- Test Hypothesis 2: Flipped Orientation (180-degree flip) ---
+            corrected_angle_flipped = (detected_angle + 180) % 360
+            corrected_pickup_pose_flipped = (
+                pickup_pose[0],
+                pickup_pose[1],
+                pickup_pose[2],
+                corrected_angle_flipped,
             )
-            cv2.drawContours(detected_mask_full, [rotated_cnt], -1, 255, -1)
-            x, y, w, h = cv2.boundingRect(rotated_cnt)
-            # Clamp bounding rect to image boundaries
-            img_h, img_w = detected_mask_full.shape
-            x = max(0, x)
-            y = max(0, y)
-            w = min(w, img_w - x)
-            h = min(h, img_h - y)
-            detected_cropped = detected_mask_full[y : y + h, x : x + w]
 
-            # Check if cropped image is empty
-            if detected_cropped.size == 0 or w == 0 or h == 0:
-                print(
-                    f"Warning: Empty detected mask for piece {best_match}, skipping IoU computation"
-                )
-                detected_resized = np.zeros((200, 200), dtype=np.uint8)
-                detected_flipped_resized = np.zeros((200, 200), dtype=np.uint8)
+            iou_flipped, detected_flipped_resized = get_final_iou(
+                detected_cnt,  # Use original contour
+                corrected_pickup_pose_flipped,  # Use flipped pose
+                target_pose,
+                best_match,
+                target_mask,
+            )
+
+            # Resize target mask one last time for storing
+            target_resized = cv2.resize(
+                target_mask, (200, 200), interpolation=cv2.INTER_NEAREST
+            )
+
+            # --- Decide best orientation based on the new, correct IoU ---
+            if iou_flipped > iou_normal:
+                corrected_angle = corrected_angle_flipped
+                corrected_pickup_pose = corrected_pickup_pose_flipped
             else:
-                # Resize both masks to 200x200 for comparison
-                target_resized = cv2.resize(
-                    target_mask, (200, 200), interpolation=cv2.INTER_NEAREST
-                )
-                detected_resized = cv2.resize(
-                    detected_cropped, (200, 200), interpolation=cv2.INTER_NEAREST
-                )
+                corrected_angle = detected_angle
+                corrected_pickup_pose = pickup_pose
 
-                # Compute IoU for normal orientation
-                iou_normal = compute_iou(detected_resized, target_resized)
-
-                # Compute IoU for 180° flipped orientation
-                detected_cropped_flipped = cv2.rotate(detected_cropped, cv2.ROTATE_180)
-                detected_flipped_resized = cv2.resize(
-                    detected_cropped_flipped,
-                    (200, 200),
-                    interpolation=cv2.INTER_NEAREST,
-                )
-                iou_flipped = compute_iou(detected_flipped_resized, target_resized)
-
-                # Choose the orientation with higher IoU
-                if iou_flipped > iou_normal:
-                    corrected_angle = (detected_angle + 180) % 360
-                    corrected_pickup_pose = (
-                        pickup_pose[0],
-                        pickup_pose[1],
-                        pickup_pose[2],
-                        corrected_angle,
-                    )
-                    # Flip the contour by 180 degrees
-                    M_flip = cv2.moments(detected_cnt)
-                    if M_flip["m00"] != 0:
-                        cx_flip = int(M_flip["m10"] / M_flip["m00"])
-                        cy_flip = int(M_flip["m01"] / M_flip["m00"])
-                    else:
-                        cx_flip, cy_flip = 0, 0
-                    rotation_matrix_flip = cv2.getRotationMatrix2D(
-                        (cx_flip, cy_flip), 180, 1.0
-                    )
-                    detected_cnt = cv2.transform(
-                        detected_cnt.reshape(-1, 1, 2).astype(np.float32),
-                        rotation_matrix_flip,
-                    ).astype(np.int32)
-                else:
-                    corrected_angle = detected_angle
-                    corrected_pickup_pose = pickup_pose
-
-            # Update detected_pieces with corrected angle and possibly flipped contour
+            # Update detected_pieces with the corrected angle and pose
+            # This is critical for the `highlight_solution_piece` function,
+            # which also calls `transform_contour` and needs the correct pose.
             detected_pieces[detected_idx] = (
-                detected_cnt,
+                detected_cnt,  # Still use the *original* contour
                 detected_hu,
                 detected_centroid,
-                corrected_angle,
-                corrected_pickup_pose,
+                corrected_angle,  # The *winning* angle
+                corrected_pickup_pose,  # The *winning* pose
             )
 
+            # --- Final Calculation for solution_map ---
+            # (Based on the *winning* orientation)
             translation_mm = (
                 target_pose[0] - corrected_pickup_pose[0],
                 target_pose[1] - corrected_pickup_pose[1],
             )
-            # Normalize angles to [0, 180) range for proper rotation calculation
-            detected_angle_norm = corrected_angle % 180
-            best_target_angle_norm = best_target_angle % 180
-            rotation_deg = -(
-                best_target_angle_norm - detected_angle_norm
-            )  # Invert sign for counter-clockwise positive
+
+            # Re-calculate final rotation needed for the robot
+            # This is the difference between the target's "absolute" angle
+            # and the detected piece's *corrected* "absolute" angle.
+            # detected_angle_norm = corrected_angle % 180
+            # best_target_angle_norm = best_target_angle % 180
+            # rotation_deg = -(
+            #     best_target_angle_norm - best_target_angle_norm
+            # )  # Invert sign for counter-clockwise positive
+
+            diff = (corrected_angle - best_target_angle) % 360
+            rotation_deg = min(diff, 360 - diff)
 
             solution_map.append(
                 (
-                    corrected_pickup_pose,
+                    corrected_pickup_pose,  # The winning pose
                     target_pose,
                     translation_mm,
                     rotation_deg,
                     best_match,
-                    iou_normal,
-                    iou_flipped,
-                    target_resized,
-                    detected_resized,
-                    detected_flipped_resized,
+                    iou_normal,  # Store for info
+                    iou_flipped,  # Store for info
+                    target_resized,  # Store for info
+                    detected_resized,  # Store for info
+                    detected_flipped_resized,  # Store for info
                 )
             )
 
-        # Sort solution_map to match the order of detected_pieces
+        # Sort solution_map to match the original order of detected_pieces
+        # This is important for hover highlighting
         solution_map = [solution_map[i] for i in np.argsort(row_ind)]
 
         return solution_map
