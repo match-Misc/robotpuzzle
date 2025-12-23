@@ -6,7 +6,7 @@ import serial
 
 # --- Configuration ---
 # Set the serial port your D1 Mini is connected to.
-SERIAL_PORT = "COM7"
+SERIAL_PORT = "COM11"
 
 # Set the baud rate. Your README mentions 9600 for the D1 Mini.
 # If this doesn't work, 115200 is another common rate.
